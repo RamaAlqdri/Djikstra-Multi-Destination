@@ -1,0 +1,246 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=DM+Sans:wght@400;500;700&display=swap');
+
+:root {
+  --bg-a: #f4f7fb;
+  --bg-b: #dbeafe;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-border: rgba(15, 23, 42, 0.12);
+  --ink-main: #0f172a;
+  --ink-soft: #334155;
+  --accent: #0f766e;
+  --accent-hover: #0b5f58;
+  --danger: #be123c;
+  --danger-hover: #9f1239;
+  --shadow: 0 20px 45px rgba(15, 23, 42, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'DM Sans', 'Space Grotesk', sans-serif;
+  color: var(--ink-main);
+  background:
+    radial-gradient(circle at 10% 20%, rgba(14, 165, 233, 0.16), transparent 32%),
+    radial-gradient(circle at 90% 85%, rgba(20, 184, 166, 0.2), transparent 40%),
+    linear-gradient(160deg, var(--bg-a), var(--bg-b));
+}
+
+code {
+  font-family: 'Space Grotesk', monospace;
+  font-size: 0.95em;
+  color: #0f766e;
+}
+
+.page-shell {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.top-header {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+}
+
+.top-header h1 {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  letter-spacing: 0.02em;
+}
+
+.top-header p {
+  margin: 10px 0 0;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.layout-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(290px, 360px) 1fr;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+}
+
+.control-panel {
+  padding: 16px;
+}
+
+.control-panel h2 {
+  margin: 0 0 14px;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.control-panel label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 0.94rem;
+  color: var(--ink-soft);
+}
+
+.control-panel select,
+.control-panel input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(30, 41, 59, 0.25);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  color: var(--ink-main);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.inline-actions {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-weight: 700;
+  font-family: 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  background: #e2e8f0;
+  color: #0f172a;
+  transition: transform 0.15s ease, background-color 0.2s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  background: #cbd5e1;
+}
+
+.btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #f8fafc;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fdf2f8;
+}
+
+.btn-danger:hover {
+  background: var(--danger-hover);
+}
+
+.hint-box,
+.error-box,
+.result-summary {
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.hint-box {
+  background: rgba(203, 213, 225, 0.45);
+}
+
+.error-box {
+  background: rgba(255, 228, 230, 0.9);
+  border: 1px solid rgba(225, 29, 72, 0.3);
+}
+
+.error-box p,
+.hint-box p,
+.result-summary p {
+  margin: 8px 0 0;
+}
+
+.result-summary {
+  background: rgba(240, 253, 250, 0.92);
+  border: 1px solid rgba(13, 148, 136, 0.25);
+}
+
+.result-summary h3 {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.map-panel {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.leaflet-map {
+  width: 100%;
+  height: min(72vh, 740px);
+  min-height: 460px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+}
+
+.segment-list {
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.segment-list h3 {
+  margin: 0 0 10px;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.segment-item {
+  border: 1px solid rgba(30, 41, 59, 0.15);
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.segment-item h4 {
+  margin: 0;
+  font-size: 0.96rem;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.segment-item p {
+  margin: 6px 0 0;
+  color: #334155;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 980px) {
+  .layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .leaflet-map {
+    height: 58vh;
+    min-height: 380px;
+  }
+}
