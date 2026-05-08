@@ -323,6 +323,20 @@ code {
   display: inline-block;
 }
 
+.history-panel {
+  margin-top: 16px;
+  padding: 12px;
+}
+
+.history-panel h3 {
+  margin: 0 0 10px;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.history-table-wrap {
+  overflow-x: auto;
+}
+
 @media (max-width: 980px) {
   .layout-grid {
     grid-template-columns: 1fr;

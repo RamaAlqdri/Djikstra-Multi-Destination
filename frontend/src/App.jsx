@@ -12,7 +12,7 @@ const API_BASE_URL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ||
   'http://127.0.0.1:8000';
 
-const DEFAULT_CENTER = [-6.2088, 106.8456]; // Jakarta
+const DEFAULT_CENTER = [-7.9529, 112.6145]; // Universitas Brawijaya, Malang
 const ROUTE_COLORS = ['#d7263d', '#f46036', '#2e294e', '#1b998b', '#e2c044', '#6a4c93'];
 const CHART_ALGORITHM_ORDER = ['EAMDSP', 'CDSSSD', 'MDMSMD'];
 const CHART_COLORS = {
@@ -36,6 +36,11 @@ function formatDistance(meters) {
   return `${(meters / 1000).toFixed(2)} km`;
 }
 
+function formatKilometersFromMeters(meters) {
+  if (typeof meters !== 'number') return '-';
+  return `${(meters / 1000).toFixed(2)} km`;
+}
+
 function formatDuration(seconds) {
   if (typeof seconds !== 'number') return '-';
   const totalMinutes = Math.round(seconds / 60);
@@ -47,6 +52,13 @@ function formatDuration(seconds) {
 
 function formatCost(totalCost, costMetric) {
   if (typeof totalCost !== 'number') return '-';
+  if (costMetric === 'ongkir') {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      maximumFractionDigits: 0,
+    }).format(totalCost);
+  }
   if (costMetric === 'distance') return formatDistance(totalCost);
   return formatDuration(totalCost);
 }
@@ -87,7 +99,8 @@ function CostComparisonChart({ dataPoints, costMetric }) {
     <div className="chart-panel card">
       <h3>Cost Wise Comparison</h3>
       <p className="chart-caption">
-        Total Cost by No. of Items ({costMetric === 'distance' ? 'meter' : 'detik'})
+        Total Cost by No. of Items (
+        {costMetric === 'distance' ? 'meter' : costMetric === 'duration' ? 'detik' : 'rupiah'})
       </p>
 
       <svg className="comparison-chart" viewBox={`0 0 ${width} ${height}`} role="img">
@@ -249,16 +262,23 @@ function App() {
       setResult(payload.data);
       setComparisonHistory((prev) => {
         const costByAlgorithm = {};
+        const distanceByAlgorithm = {};
         for (const item of payload.data.results || []) {
           if (typeof item?.total_cost === 'number') {
             costByAlgorithm[item.algorithm] = item.total_cost;
           }
+          const totalDistanceM = (item?.segments || []).reduce((sum, segment) => {
+            if (typeof segment?.distance_m !== 'number') return sum;
+            return sum + segment.distance_m;
+          }, 0);
+          distanceByAlgorithm[item.algorithm] = totalDistanceM;
         }
 
         const entry = {
           metric: payload.data.cost_metric,
           itemCount: destinations.length,
           costByAlgorithm,
+          distanceByAlgorithm,
         };
         return [...prev, entry];
       });
@@ -278,13 +298,24 @@ function App() {
     return result.results.find((item) => item.algorithm === activeAlgorithm) || result.results[0] || null;
   }, [result, activeAlgorithm]);
 
+  const resultsWithDistance = useMemo(() => {
+    if (!result || !Array.isArray(result.results)) return [];
+    return result.results.map((item) => {
+      const totalDistanceM = (item.segments || []).reduce((sum, segment) => {
+        if (typeof segment?.distance_m !== 'number') return sum;
+        return sum + segment.distance_m;
+      }, 0);
+      return {
+        ...item,
+        total_distance_m: totalDistanceM,
+      };
+    });
+  }, [result]);
+
   const chartData = useMemo(() => {
-    const filtered = comparisonHistory.filter((item) => item.metric === costMetric);
-    const byItems = new Map();
-    for (const item of filtered) {
-      byItems.set(item.itemCount, item);
-    }
-    return Array.from(byItems.values()).sort((a, b) => a.itemCount - b.itemCount);
+    return comparisonHistory
+      .filter((item) => item.metric === costMetric)
+      .map((item, index) => ({ ...item, label: `Run ${index + 1}` }));
   }, [comparisonHistory, costMetric]);
 
   return (
@@ -306,6 +337,7 @@ function App() {
             <select value={costMetric} onChange={(event) => setCostMetric(event.target.value)}>
               <option value="duration">Duration (detik)</option>
               <option value="distance">Distance (meter)</option>
+              <option value="ongkir">Ongkir (Rupiah)</option>
             </select>
           </label>
 
@@ -333,6 +365,7 @@ function App() {
           <div className="hint-box">
             <strong>Status titik:</strong>
             <p>{markerSummary}</p>
+            <p>History tersimpan sampai aplikasi di-reload.</p>
           </div>
 
           {errorMessage && (
@@ -357,11 +390,12 @@ function App() {
                   <tr>
                     <th>Algorithm</th>
                     <th>Total Cost</th>
+                    <th>Total KM</th>
                     <th>Visited Nodes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {result.results?.map((item) => (
+                  {resultsWithDistance.map((item) => (
                     <tr
                       key={`compare-${item.algorithm}`}
                       className={item.algorithm === activeAlgorithm ? 'is-active' : ''}
@@ -369,6 +403,7 @@ function App() {
                     >
                       <td>{item.algorithm}</td>
                       <td>{formatCost(item.total_cost, result.cost_metric)}</td>
+                      <td>{formatKilometersFromMeters(item.total_distance_m)}</td>
                       <td>{item.total_visited_nodes}</td>
                     </tr>
                   ))}
@@ -379,7 +414,7 @@ function App() {
         </section>
 
         <section className="map-panel card">
-          <MapContainer center={DEFAULT_CENTER} zoom={13} scrollWheelZoom className="leaflet-map">
+          <MapContainer center={DEFAULT_CENTER} zoom={16} scrollWheelZoom className="leaflet-map">
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -457,6 +492,44 @@ function App() {
       </main>
 
       <CostComparisonChart dataPoints={chartData} costMetric={costMetric} />
+
+      {comparisonHistory.length > 0 && (
+        <section className="history-panel card">
+          <h3>Semua History Run</h3>
+          <div className="history-table-wrap">
+            <table className="comparison-table">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Items</th>
+                  <th>Metric</th>
+                  <th>EAMDSP</th>
+                  <th>CDSSSD</th>
+                  <th>MDMSMD</th>
+                  <th>EAMDSP KM</th>
+                  <th>CDSSSD KM</th>
+                  <th>MDMSMD KM</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparisonHistory.map((entry, index) => (
+                  <tr key={`history-${index}`}>
+                    <td>{index + 1}</td>
+                    <td>{entry.itemCount}</td>
+                    <td>{entry.metric}</td>
+                    <td>{formatCost(entry.costByAlgorithm.EAMDSP, entry.metric)}</td>
+                    <td>{formatCost(entry.costByAlgorithm.CDSSSD, entry.metric)}</td>
+                    <td>{formatCost(entry.costByAlgorithm.MDMSMD, entry.metric)}</td>
+                    <td>{formatKilometersFromMeters(entry.distanceByAlgorithm?.EAMDSP)}</td>
+                    <td>{formatKilometersFromMeters(entry.distanceByAlgorithm?.CDSSSD)}</td>
+                    <td>{formatKilometersFromMeters(entry.distanceByAlgorithm?.MDMSMD)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

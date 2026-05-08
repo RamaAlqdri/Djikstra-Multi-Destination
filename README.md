@@ -77,6 +77,10 @@ Contoh payload `POST /api/solve`:
 Catatan perilaku endpoint:
 - Backend akan **selalu menjalankan ketiga algoritma** (`CDSSSD`, `MDMSMD`, `EAMDSP`) dalam satu request.
 - Response berisi `results` untuk masing-masing algoritma + ringkasan pembanding seperti `best_by_total_cost`.
+- `cost_metric` mendukung: `duration`, `distance`, dan `ongkir`.
+- Untuk `ongkir`, bobot dihitung dari jarak OSRM:
+  - <= 1 km: Rp 6.000
+  - > 1 km: Rp 6.000 + Rp 2.500 per km berikutnya (pro-rata).
 
 Catatan:
 

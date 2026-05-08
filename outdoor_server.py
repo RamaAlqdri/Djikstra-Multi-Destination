@@ -25,8 +25,11 @@ from urllib.request import Request, urlopen
 from algorithms import PathNotFoundError, run_cdsssd, run_eamdsp, run_mdmsmd
 
 AlgorithmName = Literal["CDSSSD", "MDMSMD", "EAMDSP"]
-CostMetric = Literal["distance", "duration"]
+CostMetric = Literal["distance", "duration", "ongkir"]
 ALL_ALGORITHMS: Tuple[AlgorithmName, ...] = ("CDSSSD", "MDMSMD", "EAMDSP")
+ONGKIR_BASE_PRICE = 6000.0
+ONGKIR_BASE_DISTANCE_M = 1000.0
+ONGKIR_NEXT_KM_PRICE = 2500.0
 
 
 class ApiValidationError(ValueError):
@@ -135,10 +138,39 @@ def _parse_cost_metric(value: Any) -> CostMetric:
     if not isinstance(value, str):
         raise ApiValidationError("cost_metric must be a string")
 
-    allowed: Tuple[CostMetric, ...] = ("distance", "duration")
+    allowed: Tuple[CostMetric, ...] = ("distance", "duration", "ongkir")
     if value not in allowed:
-        raise ApiValidationError("cost_metric must be 'distance' or 'duration'")
+        raise ApiValidationError("cost_metric must be 'distance', 'duration', or 'ongkir'")
     return value  # type: ignore[return-value]
+
+
+def _distance_to_ongkir(distance_m: float) -> float:
+    """Convert one travel distance in meters to ongkir fare (IDR)."""
+
+    if distance_m <= ONGKIR_BASE_DISTANCE_M:
+        return ONGKIR_BASE_PRICE
+    extra_km = (distance_m - ONGKIR_BASE_DISTANCE_M) / 1000.0
+    return ONGKIR_BASE_PRICE + (extra_km * ONGKIR_NEXT_KM_PRICE)
+
+
+def _convert_distance_matrix_to_ongkir(
+    distance_matrix: List[List[float | None]],
+) -> List[List[float | None]]:
+    """Transform distance matrix (meters) into ongkir matrix (IDR)."""
+
+    transformed: List[List[float | None]] = []
+    for row_idx, row in enumerate(distance_matrix):
+        transformed_row: List[float | None] = []
+        for col_idx, value in enumerate(row):
+            if value is None:
+                transformed_row.append(None)
+                continue
+            if row_idx == col_idx:
+                transformed_row.append(0.0)
+                continue
+            transformed_row.append(_distance_to_ongkir(float(value)))
+        transformed.append(transformed_row)
+    return transformed
 
 
 def _parse_profile(value: Any) -> str:
@@ -520,12 +552,15 @@ def solve_outdoor_multidest(payload: Dict[str, Any], osrm_base_url: str) -> Dict
     all_points = [source] + destinations
     point_lookup = _map_points_by_id(all_points)
 
+    matrix_request_metric: CostMetric = "distance" if cost_metric == "ongkir" else cost_metric
     matrix = _fetch_cost_matrix(
         osrm_base_url=osrm_base_url,
         profile=profile,
         points=all_points,
-        cost_metric=cost_metric,
+        cost_metric=matrix_request_metric,
     )
+    if cost_metric == "ongkir":
+        matrix = _convert_distance_matrix_to_ongkir(matrix)
 
     graph = _build_graph_from_matrix(points=all_points, matrix=matrix)
     destination_ids = [point.point_id for point in destinations]
@@ -598,13 +633,26 @@ def solve_outdoor_multidest(payload: Dict[str, Any], osrm_base_url: str) -> Dict
     return {
         "profile": profile,
         "cost_metric": cost_metric,
-        "cost_unit": "meters" if cost_metric == "distance" else "seconds",
+        "cost_unit": (
+            "meters"
+            if cost_metric == "distance"
+            else "seconds"
+            if cost_metric == "duration"
+            else "idr"
+        ),
         "source": source.to_dict(),
         "destinations": [point.to_dict() for point in destinations],
         "algorithms": list(ALL_ALGORITHMS),
         "results": results,
         "best_by_total_cost": best_by_cost["algorithm"],
         "best_by_total_visited_nodes": best_by_visited["algorithm"],
+        "ongkir_pricing": {
+            "base_price_idr": ONGKIR_BASE_PRICE,
+            "base_distance_m": ONGKIR_BASE_DISTANCE_M,
+            "next_km_price_idr": ONGKIR_NEXT_KM_PRICE,
+        }
+        if cost_metric == "ongkir"
+        else None,
     }
 
 
