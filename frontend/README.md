@@ -5,10 +5,10 @@ Frontend ini digunakan untuk ilustrasi algoritma multi-destination pada peta out
 ## Fitur
 
 - Klik peta untuk set `source` (klik pertama) dan `destinations` (klik berikutnya).
-- Pilih algoritma: `CDSSSD`, `MDMSMD`, `EAMDSP`.
 - Pilih `cost_metric`: `duration` atau `distance`.
-- Menampilkan polyline rute hasil dari backend pada map Leaflet.
-- Menampilkan ringkasan hasil: visit order, total cost, total visited nodes, dan detail segment.
+- Menjalankan otomatis 3 algoritma (`CDSSSD`, `MDMSMD`, `EAMDSP`) lalu menampilkan perbandingan.
+- Menampilkan polyline rute hasil pada map Leaflet untuk algoritma yang dipilih di tabel perbandingan.
+- Menampilkan ringkasan pembanding: best total cost, best visited nodes, dan detail segment per algoritma.
 
 ## Menjalankan
 

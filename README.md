@@ -64,7 +64,6 @@ Contoh payload `POST /api/solve`:
 
 ```json
 {
-  "algorithm": "EAMDSP",
   "cost_metric": "duration",
   "profile": "driving",
   "source": { "lat": -6.2000, "lng": 106.8166 },
@@ -74,6 +73,10 @@ Contoh payload `POST /api/solve`:
   ]
 }
 ```
+
+Catatan perilaku endpoint:
+- Backend akan **selalu menjalankan ketiga algoritma** (`CDSSSD`, `MDMSMD`, `EAMDSP`) dalam satu request.
+- Response berisi `results` untuk masing-masing algoritma + ringkasan pembanding seperti `best_by_total_cost`.
 
 Catatan:
 

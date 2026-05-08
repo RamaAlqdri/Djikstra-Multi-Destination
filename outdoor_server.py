@@ -26,6 +26,7 @@ from algorithms import PathNotFoundError, run_cdsssd, run_eamdsp, run_mdmsmd
 
 AlgorithmName = Literal["CDSSSD", "MDMSMD", "EAMDSP"]
 CostMetric = Literal["distance", "duration"]
+ALL_ALGORITHMS: Tuple[AlgorithmName, ...] = ("CDSSSD", "MDMSMD", "EAMDSP")
 
 
 class ApiValidationError(ValueError):
@@ -121,9 +122,8 @@ def _parse_algorithm(value: Any) -> AlgorithmName:
     if not isinstance(value, str):
         raise ApiValidationError("algorithm must be a string")
 
-    allowed: Tuple[AlgorithmName, ...] = ("CDSSSD", "MDMSMD", "EAMDSP")
-    if value not in allowed:
-        raise ApiValidationError(f"algorithm must be one of: {', '.join(allowed)}")
+    if value not in ALL_ALGORITHMS:
+        raise ApiValidationError(f"algorithm must be one of: {', '.join(ALL_ALGORITHMS)}")
     return value  # type: ignore[return-value]
 
 
@@ -372,10 +372,26 @@ def _enrich_segments(
     point_lookup: Dict[str, GeoPoint],
     osrm_base_url: str,
     profile: str,
+    geometry_cache: Dict[Tuple[str, str], Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
     """Enrich algorithm segment outputs with map geometry."""
 
     enriched: List[Dict[str, Any]] = []
+    cache = geometry_cache if geometry_cache is not None else {}
+
+    def get_segment_geometry(start: GeoPoint, end: GeoPoint) -> Dict[str, Any]:
+        cache_key = (start.point_id, end.point_id)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+        geometry_data = _fetch_segment_geometry(
+            osrm_base_url=osrm_base_url,
+            profile=profile,
+            start=start,
+            end=end,
+        )
+        cache[cache_key] = geometry_data
+        return geometry_data
 
     if algorithm == "CDSSSD":
         # CDSSSD reports per-destination independent query results.
@@ -405,12 +421,7 @@ def _enrich_segments(
 
             start_point = point_lookup[source_id]
             end_point = point_lookup[destination_id]
-            geometry_data = _fetch_segment_geometry(
-                osrm_base_url=osrm_base_url,
-                profile=profile,
-                start=start_point,
-                end=end_point,
-            )
+            geometry_data = get_segment_geometry(start=start_point, end=end_point)
 
             enriched.append(
                 {
@@ -454,9 +465,7 @@ def _enrich_segments(
         if not isinstance(visited_nodes, int):
             raise ExternalServiceError("invalid segment visited_nodes payload")
 
-        geometry_data = _fetch_segment_geometry(
-            osrm_base_url=osrm_base_url,
-            profile=profile,
+        geometry_data = get_segment_geometry(
             start=point_lookup[from_id],
             end=point_lookup[to_id],
         )
@@ -483,7 +492,6 @@ def solve_outdoor_multidest(payload: Dict[str, Any], osrm_base_url: str) -> Dict
 
     Expected payload:
     {
-      "algorithm": "EAMDSP" | "MDMSMD" | "CDSSSD",
       "cost_metric": "duration" | "distance",
       "profile": "driving",
       "source": {"lat": ..., "lng": ...},
@@ -491,7 +499,6 @@ def solve_outdoor_multidest(payload: Dict[str, Any], osrm_base_url: str) -> Dict
     }
     """
 
-    algorithm = _parse_algorithm(payload.get("algorithm", "EAMDSP"))
     cost_metric = _parse_cost_metric(payload.get("cost_metric"))
     profile = _parse_profile(payload.get("profile"))
 
@@ -523,55 +530,82 @@ def solve_outdoor_multidest(payload: Dict[str, Any], osrm_base_url: str) -> Dict
     graph = _build_graph_from_matrix(points=all_points, matrix=matrix)
     destination_ids = [point.point_id for point in destinations]
 
-    try:
-        raw_result = _run_algorithm(
-            algorithm=algorithm,
-            graph=graph,
-            source_id=source.point_id,
-            destination_ids=destination_ids,
-        )
-    except PathNotFoundError as exc:
-        raise ApiValidationError(str(exc)) from exc
+    geometry_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    results: List[Dict[str, Any]] = []
 
-    segments = _enrich_segments(
-        algorithm=algorithm,
-        raw_result=raw_result,
-        source_id=source.point_id,
-        point_lookup=point_lookup,
-        osrm_base_url=osrm_base_url,
-        profile=profile,
+    for algorithm in ALL_ALGORITHMS:
+        try:
+            raw_result = _run_algorithm(
+                algorithm=algorithm,
+                graph=graph,
+                source_id=source.point_id,
+                destination_ids=destination_ids,
+            )
+        except PathNotFoundError as exc:
+            raise ApiValidationError(str(exc)) from exc
+
+        segments = _enrich_segments(
+            algorithm=algorithm,
+            raw_result=raw_result,
+            source_id=source.point_id,
+            point_lookup=point_lookup,
+            osrm_base_url=osrm_base_url,
+            profile=profile,
+            geometry_cache=geometry_cache,
+        )
+
+        visit_order_ids = raw_result.get("visit_order", [])
+        if not isinstance(visit_order_ids, list) or not all(
+            isinstance(node_id, str) for node_id in visit_order_ids
+        ):
+            raise ExternalServiceError("invalid visit_order in algorithm output")
+
+        full_path_ids: List[str] = []
+        raw_full_path = raw_result.get("full_path")
+        if isinstance(raw_full_path, list) and all(
+            isinstance(node_id, str) for node_id in raw_full_path
+        ):
+            full_path_ids = list(raw_full_path)
+
+        results.append(
+            {
+                "algorithm": algorithm,
+                "visit_order": [point_lookup[node_id].to_dict() for node_id in visit_order_ids],
+                "total_cost": raw_result.get("total_cost"),
+                "total_visited_nodes": raw_result.get("total_visited_nodes"),
+                "segments": segments,
+                "full_path_ids": full_path_ids,
+                "full_path_coordinates": _serialize_path_ids(full_path_ids, point_lookup)
+                if full_path_ids
+                else [],
+                "raw_result": raw_result,
+            }
+        )
+
+    best_by_cost = min(
+        results,
+        key=lambda item: float(item["total_cost"])
+        if isinstance(item.get("total_cost"), (int, float))
+        else float("inf"),
+    )
+    best_by_visited = min(
+        results,
+        key=lambda item: int(item["total_visited_nodes"])
+        if isinstance(item.get("total_visited_nodes"), int)
+        else 10**9,
     )
 
-    visit_order_ids = raw_result.get("visit_order", [])
-    if not isinstance(visit_order_ids, list) or not all(
-        isinstance(node_id, str) for node_id in visit_order_ids
-    ):
-        raise ExternalServiceError("invalid visit_order in algorithm output")
-
-    full_path_ids: List[str] = []
-    raw_full_path = raw_result.get("full_path")
-    if isinstance(raw_full_path, list) and all(isinstance(node_id, str) for node_id in raw_full_path):
-        full_path_ids = list(raw_full_path)
-
-    response: Dict[str, Any] = {
-        "algorithm": algorithm,
+    return {
         "profile": profile,
         "cost_metric": cost_metric,
         "cost_unit": "meters" if cost_metric == "distance" else "seconds",
         "source": source.to_dict(),
         "destinations": [point.to_dict() for point in destinations],
-        "visit_order": [point_lookup[node_id].to_dict() for node_id in visit_order_ids],
-        "total_cost": raw_result.get("total_cost"),
-        "total_visited_nodes": raw_result.get("total_visited_nodes"),
-        "segments": segments,
-        "full_path_ids": full_path_ids,
-        "full_path_coordinates": _serialize_path_ids(full_path_ids, point_lookup)
-        if full_path_ids
-        else [],
-        "raw_result": raw_result,
+        "algorithms": list(ALL_ALGORITHMS),
+        "results": results,
+        "best_by_total_cost": best_by_cost["algorithm"],
+        "best_by_total_visited_nodes": best_by_visited["algorithm"],
     }
-
-    return response
 
 
 def _build_handler(osrm_base_url: str):

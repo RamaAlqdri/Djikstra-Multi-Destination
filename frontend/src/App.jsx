@@ -14,6 +14,12 @@ const API_BASE_URL =
 
 const DEFAULT_CENTER = [-6.2088, 106.8456]; // Jakarta
 const ROUTE_COLORS = ['#d7263d', '#f46036', '#2e294e', '#1b998b', '#e2c044', '#6a4c93'];
+const CHART_ALGORITHM_ORDER = ['EAMDSP', 'CDSSSD', 'MDMSMD'];
+const CHART_COLORS = {
+  EAMDSP: '#3b82f6',
+  CDSSSD: '#ef4444',
+  MDMSMD: '#84cc16',
+};
 
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
@@ -45,8 +51,124 @@ function formatCost(totalCost, costMetric) {
   return formatDuration(totalCost);
 }
 
+function formatChartValue(value) {
+  if (typeof value !== 'number') return '';
+  return `${Math.round(value)}`;
+}
+
+function CostComparisonChart({ dataPoints, costMetric }) {
+  if (!Array.isArray(dataPoints) || dataPoints.length === 0) return null;
+
+  const width = 820;
+  const height = 360;
+  const margin = { top: 28, right: 26, bottom: 64, left: 60 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const maxCost = dataPoints.reduce((acc, item) => {
+    const values = CHART_ALGORITHM_ORDER.map((name) => item.costByAlgorithm?.[name]).filter(
+      (value) => typeof value === 'number'
+    );
+    if (values.length === 0) return acc;
+    return Math.max(acc, ...values);
+  }, 0);
+  const yMax = maxCost <= 0 ? 1 : Math.ceil(maxCost * 1.1);
+  const yTicks = 5;
+
+  function xPosition(index) {
+    if (dataPoints.length === 1) return margin.left + plotWidth / 2;
+    return margin.left + (index / (dataPoints.length - 1)) * plotWidth;
+  }
+
+  function yPosition(value) {
+    return margin.top + ((yMax - value) / yMax) * plotHeight;
+  }
+
+  return (
+    <div className="chart-panel card">
+      <h3>Cost Wise Comparison</h3>
+      <p className="chart-caption">
+        Total Cost by No. of Items ({costMetric === 'distance' ? 'meter' : 'detik'})
+      </p>
+
+      <svg className="comparison-chart" viewBox={`0 0 ${width} ${height}`} role="img">
+        {[...Array(yTicks + 1)].map((_, tick) => {
+          const ratio = tick / yTicks;
+          const value = Math.round(yMax * (1 - ratio));
+          const y = margin.top + ratio * plotHeight;
+          return (
+            <g key={`y-tick-${tick}`}>
+              <line
+                x1={margin.left}
+                y1={y}
+                x2={margin.left + plotWidth}
+                y2={y}
+                stroke="rgba(100, 116, 139, 0.25)"
+                strokeWidth="1"
+              />
+              <text x={margin.left - 10} y={y + 4} textAnchor="end" className="axis-label">
+                {value}
+              </text>
+            </g>
+          );
+        })}
+
+        {CHART_ALGORITHM_ORDER.map((algorithm) => {
+          const points = dataPoints
+            .map((item, index) => {
+              const value = item.costByAlgorithm?.[algorithm];
+              if (typeof value !== 'number') return null;
+              return { index, value, x: xPosition(index), y: yPosition(value) };
+            })
+            .filter(Boolean);
+          const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
+          return (
+            <g key={`series-${algorithm}`}>
+              {polylinePoints && (
+                <polyline
+                  fill="none"
+                  stroke={CHART_COLORS[algorithm]}
+                  strokeWidth="3"
+                  points={polylinePoints}
+                />
+              )}
+              {points.map((point) => (
+                <g key={`${algorithm}-${point.index}`}>
+                  <circle cx={point.x} cy={point.y} r="4.5" fill={CHART_COLORS[algorithm]} />
+                  <text x={point.x} y={point.y - 10} textAnchor="middle" className="value-label">
+                    {formatChartValue(point.value)}
+                  </text>
+                </g>
+              ))}
+            </g>
+          );
+        })}
+
+        {dataPoints.map((item, index) => (
+          <text
+            key={`x-label-${index}`}
+            x={xPosition(index)}
+            y={height - margin.bottom + 26}
+            textAnchor="middle"
+            className="axis-label"
+          >
+            {`Items (${item.itemCount})`}
+          </text>
+        ))}
+      </svg>
+
+      <div className="chart-legend">
+        {CHART_ALGORITHM_ORDER.map((algorithm) => (
+          <span key={`legend-${algorithm}`} className="legend-item">
+            <i style={{ backgroundColor: CHART_COLORS[algorithm] }} />
+            {algorithm}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function App() {
-  const [algorithm, setAlgorithm] = useState('EAMDSP');
   const [costMetric, setCostMetric] = useState('duration');
   const [profile, setProfile] = useState('driving');
 
@@ -56,6 +178,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [result, setResult] = useState(null);
+  const [activeAlgorithm, setActiveAlgorithm] = useState('EAMDSP');
+  const [comparisonHistory, setComparisonHistory] = useState([]);
 
   const markerSummary = useMemo(() => {
     if (!source) return 'Klik peta untuk set source.';
@@ -81,6 +205,7 @@ function App() {
     setSource(null);
     setDestinations([]);
     setResult(null);
+    setActiveAlgorithm('EAMDSP');
     setErrorMessage('');
   }
 
@@ -109,7 +234,6 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          algorithm,
           cost_metric: costMetric,
           profile,
           source,
@@ -123,36 +247,59 @@ function App() {
       }
 
       setResult(payload.data);
+      setComparisonHistory((prev) => {
+        const costByAlgorithm = {};
+        for (const item of payload.data.results || []) {
+          if (typeof item?.total_cost === 'number') {
+            costByAlgorithm[item.algorithm] = item.total_cost;
+          }
+        }
+
+        const entry = {
+          metric: payload.data.cost_metric,
+          itemCount: destinations.length,
+          costByAlgorithm,
+        };
+        return [...prev, entry];
+      });
+      const defaultAlgorithm = payload.data.best_by_total_cost || payload.data.algorithms?.[0] || 'EAMDSP';
+      setActiveAlgorithm(defaultAlgorithm);
     } catch (error) {
       setResult(null);
+      setActiveAlgorithm('EAMDSP');
       setErrorMessage(error.message || 'Terjadi error saat memproses route.');
     } finally {
       setIsLoading(false);
     }
   }
 
+  const activeResult = useMemo(() => {
+    if (!result || !Array.isArray(result.results)) return null;
+    return result.results.find((item) => item.algorithm === activeAlgorithm) || result.results[0] || null;
+  }, [result, activeAlgorithm]);
+
+  const chartData = useMemo(() => {
+    const filtered = comparisonHistory.filter((item) => item.metric === costMetric);
+    const byItems = new Map();
+    for (const item of filtered) {
+      byItems.set(item.itemCount, item);
+    }
+    return Array.from(byItems.values()).sort((a, b) => a.itemCount - b.itemCount);
+  }, [comparisonHistory, costMetric]);
+
   return (
     <div className="page-shell">
       <header className="top-header">
         <h1>Outdoor Multi-Destination Routing</h1>
         <p>
-          Klik peta untuk memilih source dan destination, lalu jalankan algoritma
-          <code>CDSSSD</code>, <code>MDMSMD</code>, atau <code>EAMDSP</code>.
+          Klik peta untuk memilih source dan destination, lalu jalankan perbandingan otomatis
+          <code>CDSSSD</code>, <code>MDMSMD</code>, dan <code>EAMDSP</code>.
         </p>
       </header>
 
       <main className="layout-grid">
         <section className="control-panel card">
           <h2>Control Panel</h2>
-
-          <label>
-            Algorithm
-            <select value={algorithm} onChange={(event) => setAlgorithm(event.target.value)}>
-              <option value="CDSSSD">CDSSSD</option>
-              <option value="MDMSMD">MDMSMD</option>
-              <option value="EAMDSP">EAMDSP</option>
-            </select>
-          </label>
 
           <label>
             Cost Metric
@@ -173,7 +320,7 @@ function App() {
 
           <div className="inline-actions">
             <button className="btn btn-primary" onClick={runRouting} disabled={isLoading}>
-              {isLoading ? 'Memproses...' : 'Run Algorithm'}
+              {isLoading ? 'Memproses...' : 'Run Perbandingan 3 Algoritma'}
             </button>
             <button className="btn" onClick={undoLastDestination} disabled={destinations.length === 0}>
               Undo Destination
@@ -197,20 +344,36 @@ function App() {
 
           {result && (
             <div className="result-summary">
-              <h3>Ringkasan Hasil</h3>
+              <h3>Ringkasan Perbandingan</h3>
               <p>
-                <strong>Algorithm:</strong> {result.algorithm}
+                <strong>Best Total Cost:</strong> {result.best_by_total_cost}
               </p>
               <p>
-                <strong>Total Cost:</strong> {formatCost(result.total_cost, result.cost_metric)}
+                <strong>Best Total Visited Nodes:</strong> {result.best_by_total_visited_nodes}
               </p>
-              <p>
-                <strong>Total Visited Nodes:</strong> {result.total_visited_nodes}
-              </p>
-              <p>
-                <strong>Visit Order:</strong>{' '}
-                {result.visit_order.map((point) => point.id).join(' -> ') || '-'}
-              </p>
+
+              <table className="comparison-table">
+                <thead>
+                  <tr>
+                    <th>Algorithm</th>
+                    <th>Total Cost</th>
+                    <th>Visited Nodes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.results?.map((item) => (
+                    <tr
+                      key={`compare-${item.algorithm}`}
+                      className={item.algorithm === activeAlgorithm ? 'is-active' : ''}
+                      onClick={() => setActiveAlgorithm(item.algorithm)}
+                    >
+                      <td>{item.algorithm}</td>
+                      <td>{formatCost(item.total_cost, result.cost_metric)}</td>
+                      <td>{item.total_visited_nodes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </section>
@@ -248,7 +411,7 @@ function App() {
               </CircleMarker>
             ))}
 
-            {result?.segments?.map((segment, index) => {
+            {activeResult?.segments?.map((segment, index) => {
               const positions =
                 Array.isArray(segment.geometry) && segment.geometry.length > 0
                   ? segment.geometry
@@ -270,10 +433,13 @@ function App() {
             })}
           </MapContainer>
 
-          {result && (
+          {activeResult && (
             <div className="segment-list">
-              <h3>Segments</h3>
-              {result.segments.map((segment, index) => (
+              <h3>
+                Segments ({activeResult.algorithm}) | Visit Order:{' '}
+                {activeResult.visit_order?.map((point) => point.id).join(' -> ') || '-'}
+              </h3>
+              {activeResult.segments.map((segment, index) => (
                 <article className="segment-item" key={`segment-item-${index}`}>
                   <h4>
                     {index + 1}. {segment.from.id} → {segment.to.id}
@@ -289,6 +455,8 @@ function App() {
           )}
         </section>
       </main>
+
+      <CostComparisonChart dataPoints={chartData} costMetric={costMetric} />
     </div>
   );
 }
