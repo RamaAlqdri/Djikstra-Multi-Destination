@@ -1,4 +1,7 @@
 # Python cache and bytecode
+
+frontend/
+
 __pycache__/
 *.py[cod]
 *$py.class

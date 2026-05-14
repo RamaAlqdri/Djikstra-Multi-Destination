@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY algorithms.py outdoor_server.py ./
+
+EXPOSE 8000
+
+CMD ["python", "outdoor_server.py", "--host", "0.0.0.0", "--port", "8000"]
