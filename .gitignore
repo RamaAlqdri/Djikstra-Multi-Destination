@@ -1,6 +1,7 @@
 # Python cache and bytecode
 
 frontend/
+.github/
 
 __pycache__/
 *.py[cod]
