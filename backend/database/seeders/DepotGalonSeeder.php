@@ -9,15 +9,13 @@ class DepotGalonSeeder extends Seeder
 {
     public function run(): void
     {
-        DepotGalon::insert([
+        DepotGalon::updateOrCreate(
+            ['nama_depot' => 'Depot Galon Pusat'],
             [
-                'nama_depot'  => 'Depot Galon Pusat',
-                'alamat'      => 'Jl. Veteran No.1, Ketawanggede, Kec. Lowokwaru, Kota Malang, Jawa Timur 65145',
-                'latitude'    => -7.9374811,
-                'longitude'   => 112.6144279,
-                'created_at'  => now(),
-                'updated_at'  => now(),
-            ],
-        ]);
+                'alamat' => 'Jl. Veteran No.1, Ketawanggede, Kec. Lowokwaru, Kota Malang, Jawa Timur 65145',
+                'latitude' => -7.9374811,
+                'longitude' => 112.6144279,
+            ]
+        );
     }
 }

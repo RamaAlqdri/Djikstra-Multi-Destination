@@ -1,534 +1,861 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   CircleMarker,
   MapContainer,
   Polyline,
   TileLayer,
   Tooltip,
-  useMapEvents,
 } from 'react-leaflet';
 
 const API_BASE_URL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ||
-  'http://127.0.0.1:8000';
+  'http://127.0.0.1:8001/api';
 
-const DEFAULT_CENTER = [-7.9529, 112.6145]; // Universitas Brawijaya, Malang
+const DEFAULT_CENTER = [-7.9529, 112.6145];
+const ALGORITHM_ORDER = ['CDSSSD', 'MDMSMD', 'EAMDSP'];
 const ROUTE_COLORS = ['#d7263d', '#f46036', '#2e294e', '#1b998b', '#e2c044', '#6a4c93'];
-const CHART_ALGORITHM_ORDER = ['EAMDSP', 'CDSSSD', 'MDMSMD'];
-const CHART_COLORS = {
-  EAMDSP: '#3b82f6',
-  CDSSSD: '#ef4444',
-  MDMSMD: '#84cc16',
+
+const emptyCustomerForm = {
+  nama_pelanggan: '',
+  alamat: '',
+  latitude: '',
+  longitude: '',
 };
 
-function MapClickHandler({ onMapClick }) {
-  useMapEvents({
-    click(event) {
-      onMapClick(event.latlng);
-    },
-  });
-  return null;
-}
+const emptyDepotForm = {
+  nama_depot: '',
+  alamat: '',
+  latitude: '',
+  longitude: '',
+};
 
 function formatDistance(meters) {
-  if (typeof meters !== 'number') return '-';
+  if (typeof meters !== 'number' || Number.isNaN(meters)) return '-';
   if (meters < 1000) return `${meters.toFixed(0)} m`;
   return `${(meters / 1000).toFixed(2)} km`;
 }
 
-function formatKilometersFromMeters(meters) {
-  if (typeof meters !== 'number') return '-';
-  return `${(meters / 1000).toFixed(2)} km`;
-}
-
 function formatDuration(seconds) {
-  if (typeof seconds !== 'number') return '-';
+  if (typeof seconds !== 'number' || Number.isNaN(seconds)) return '-';
   const totalMinutes = Math.round(seconds / 60);
   if (totalMinutes < 60) return `${totalMinutes} min`;
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return `${hours}h ${minutes}m`;
+  return `${hours}j ${minutes}m`;
 }
 
-function formatCost(totalCost, costMetric) {
-  if (typeof totalCost !== 'number') return '-';
-  if (costMetric === 'ongkir') {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      maximumFractionDigits: 0,
-    }).format(totalCost);
-  }
-  if (costMetric === 'distance') return formatDistance(totalCost);
-  return formatDuration(totalCost);
+function formatCurrency(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-';
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
-function formatChartValue(value) {
-  if (typeof value !== 'number') return '';
-  return `${Math.round(value)}`;
+function formatCost(value, metric) {
+  if (metric === 'distance') return formatDistance(value);
+  if (metric === 'ongkir') return formatCurrency(value);
+  return formatDuration(value);
 }
 
-function CostComparisonChart({ dataPoints, costMetric }) {
-  if (!Array.isArray(dataPoints) || dataPoints.length === 0) return null;
+function numericInput(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  return String(value);
+}
 
-  const width = 820;
-  const height = 360;
-  const margin = { top: 28, right: 26, bottom: 64, left: 60 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
-  const maxCost = dataPoints.reduce((acc, item) => {
-    const values = CHART_ALGORITHM_ORDER.map((name) => item.costByAlgorithm?.[name]).filter(
-      (value) => typeof value === 'number'
-    );
-    if (values.length === 0) return acc;
-    return Math.max(acc, ...values);
-  }, 0);
-  const yMax = maxCost <= 0 ? 1 : Math.ceil(maxCost * 1.1);
-  const yTicks = 5;
+async function apiFetch(path, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
 
-  function xPosition(index) {
-    if (dataPoints.length === 1) return margin.left + plotWidth / 2;
-    return margin.left + (index / (dataPoints.length - 1)) * plotWidth;
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const errorMessage = payload.message || payload.error || `Request gagal (${response.status})`;
+    throw new Error(errorMessage);
   }
 
-  function yPosition(value) {
-    return margin.top + ((yMax - value) / yMax) * plotHeight;
-  }
+  return payload;
+}
+
+function pointIdFromVisitItem(item) {
+  if (typeof item === 'string') return item;
+  if (item && typeof item === 'object' && typeof item.id === 'string') return item.id;
+  return '';
+}
+
+function customerName(pointId, pointCustomerMap) {
+  return pointCustomerMap?.[pointId]?.nama_pelanggan || pointId || '-';
+}
+
+function visitOrderText(result, pointCustomerMap) {
+  const items = Array.isArray(result?.visit_order) ? result.visit_order : [];
+  if (items.length === 0) return '-';
+  return items.map((item) => customerName(pointIdFromVisitItem(item), pointCustomerMap)).join(' -> ');
+}
+
+function algorithmSort(a, b) {
+  return ALGORITHM_ORDER.indexOf(a.algorithm) - ALGORITHM_ORDER.indexOf(b.algorithm);
+}
+
+function DeliveryMap({ delivery, activeResult }) {
+  const depot = delivery?.depot;
+  const pointCustomerMap = delivery?.point_customer_map || {};
+  const customers = Object.entries(pointCustomerMap);
+  const center = depot ? [depot.latitude, depot.longitude] : DEFAULT_CENTER;
+  const mapKey = `${delivery?.id || 'new'}-${activeResult?.algorithm || 'none'}`;
 
   return (
-    <div className="chart-panel card">
-      <h3>Cost Wise Comparison</h3>
-      <p className="chart-caption">
-        Total Cost by No. of Items (
-        {costMetric === 'distance' ? 'meter' : costMetric === 'duration' ? 'detik' : 'rupiah'})
-      </p>
+    <MapContainer key={mapKey} center={center} zoom={14} scrollWheelZoom className="route-map">
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
 
-      <svg className="comparison-chart" viewBox={`0 0 ${width} ${height}`} role="img">
-        {[...Array(yTicks + 1)].map((_, tick) => {
-          const ratio = tick / yTicks;
-          const value = Math.round(yMax * (1 - ratio));
-          const y = margin.top + ratio * plotHeight;
-          return (
-            <g key={`y-tick-${tick}`}>
-              <line
-                x1={margin.left}
-                y1={y}
-                x2={margin.left + plotWidth}
-                y2={y}
-                stroke="rgba(100, 116, 139, 0.25)"
-                strokeWidth="1"
-              />
-              <text x={margin.left - 10} y={y + 4} textAnchor="end" className="axis-label">
-                {value}
-              </text>
-            </g>
-          );
-        })}
+      {depot && (
+        <CircleMarker
+          center={[depot.latitude, depot.longitude]}
+          radius={10}
+          pathOptions={{ color: '#0f766e', fillColor: '#14b8a6', fillOpacity: 0.95, weight: 3 }}
+        >
+          <Tooltip direction="top" permanent>
+            Depot
+          </Tooltip>
+        </CircleMarker>
+      )}
 
-        {CHART_ALGORITHM_ORDER.map((algorithm) => {
-          const points = dataPoints
-            .map((item, index) => {
-              const value = item.costByAlgorithm?.[algorithm];
-              if (typeof value !== 'number') return null;
-              return { index, value, x: xPosition(index), y: yPosition(value) };
-            })
-            .filter(Boolean);
-          const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
-          return (
-            <g key={`series-${algorithm}`}>
-              {polylinePoints && (
-                <polyline
-                  fill="none"
-                  stroke={CHART_COLORS[algorithm]}
-                  strokeWidth="3"
-                  points={polylinePoints}
-                />
-              )}
-              {points.map((point) => (
-                <g key={`${algorithm}-${point.index}`}>
-                  <circle cx={point.x} cy={point.y} r="4.5" fill={CHART_COLORS[algorithm]} />
-                  <text x={point.x} y={point.y - 10} textAnchor="middle" className="value-label">
-                    {formatChartValue(point.value)}
-                  </text>
-                </g>
+      {customers.map(([pointId, pelanggan]) => (
+        <CircleMarker
+          key={`customer-${pointId}`}
+          center={[pelanggan.latitude, pelanggan.longitude]}
+          radius={8}
+          pathOptions={{ color: '#ea580c', fillColor: '#fb923c', fillOpacity: 0.94, weight: 2 }}
+        >
+          <Tooltip direction="top" permanent>
+            {pointId}
+          </Tooltip>
+        </CircleMarker>
+      ))}
+
+      {activeResult?.segments?.map((segment, index) => {
+        const positions =
+          Array.isArray(segment.geometry) && segment.geometry.length > 0
+            ? segment.geometry
+            : [
+                [segment.from?.lat, segment.from?.lng],
+                [segment.to?.lat, segment.to?.lng],
+              ].filter((point) => point.every((value) => typeof value === 'number'));
+
+        return (
+          <Polyline
+            key={`${activeResult.algorithm}-segment-${index}`}
+            positions={positions}
+            pathOptions={{
+              color: ROUTE_COLORS[index % ROUTE_COLORS.length],
+              weight: 5,
+              opacity: 0.86,
+            }}
+          />
+        );
+      })}
+    </MapContainer>
+  );
+}
+
+function ComparisonPanel({ delivery, activeAlgorithm, onActiveAlgorithmChange }) {
+  if (!delivery) return null;
+
+  const metric = delivery.cost_metric || 'duration';
+  const pointCustomerMap = delivery.point_customer_map || {};
+  const results = [...(delivery.algorithm_results || [])].sort(algorithmSort);
+  const activeResult =
+    results.find((result) => result.algorithm === activeAlgorithm) || results[0] || null;
+
+  return (
+    <section className="comparison-layout">
+      <div className="comparison-card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Perbandingan Algoritma</p>
+            <h2>Hasil tersimpan untuk pengantaran #{delivery.id}</h2>
+          </div>
+          <span className="status-pill">{delivery.status}</span>
+        </div>
+
+        <div className="summary-grid">
+          <div>
+            <span>Best Cost</span>
+            <strong>{delivery.best_by_total_cost || '-'}</strong>
+          </div>
+          <div>
+            <span>Best Visited</span>
+            <strong>{delivery.best_by_total_visited_nodes || '-'}</strong>
+          </div>
+          <div>
+            <span>Total Jarak Best</span>
+            <strong>{formatDistance((delivery.total_jarak_km || 0) * 1000)}</strong>
+          </div>
+          <div>
+            <span>Total Durasi Best</span>
+            <strong>{formatDuration(delivery.total_durasi_detik)}</strong>
+          </div>
+        </div>
+
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Algoritma</th>
+                <th>Total Cost</th>
+                <th>Jarak</th>
+                <th>Durasi</th>
+                <th>Visited</th>
+                <th>Urutan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((result) => (
+                <tr
+                  key={result.algorithm}
+                  className={result.algorithm === activeResult?.algorithm ? 'is-active' : ''}
+                  onClick={() => onActiveAlgorithmChange(result.algorithm)}
+                >
+                  <td>{result.algorithm}</td>
+                  <td>{formatCost(result.total_cost, metric)}</td>
+                  <td>{formatDistance(result.total_distance_m)}</td>
+                  <td>{formatDuration(result.total_duration_s)}</td>
+                  <td>{result.total_visited_nodes}</td>
+                  <td>{visitOrderText(result, pointCustomerMap)}</td>
+                </tr>
               ))}
-            </g>
-          );
-        })}
-
-        {dataPoints.map((item, index) => (
-          <text
-            key={`x-label-${index}`}
-            x={xPosition(index)}
-            y={height - margin.bottom + 26}
-            textAnchor="middle"
-            className="axis-label"
-          >
-            {`Items (${item.itemCount})`}
-          </text>
-        ))}
-      </svg>
-
-      <div className="chart-legend">
-        {CHART_ALGORITHM_ORDER.map((algorithm) => (
-          <span key={`legend-${algorithm}`} className="legend-item">
-            <i style={{ backgroundColor: CHART_COLORS[algorithm] }} />
-            {algorithm}
-          </span>
-        ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+
+      <div className="map-card">
+        <DeliveryMap delivery={delivery} activeResult={activeResult} />
+        {activeResult && (
+          <div className="segment-list">
+            <h3>Detail Segmen {activeResult.algorithm}</h3>
+            {activeResult.segments?.map((segment, index) => {
+              const fromId = segment.from?.id || '-';
+              const toId = segment.to?.id || '-';
+              return (
+                <article key={`${activeResult.algorithm}-detail-${index}`} className="segment-item">
+                  <h4>
+                    {index + 1}. {fromId === 'S0' ? 'Depot' : customerName(fromId, pointCustomerMap)}
+                    {' -> '}
+                    {customerName(toId, pointCustomerMap)}
+                  </h4>
+                  <p>
+                    Cost {formatCost(segment.cost, metric)} | Jarak {formatDistance(segment.distance_m)} | Durasi{' '}
+                    {formatDuration(segment.duration_s)}
+                  </p>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
 function App() {
+  const [activeView, setActiveView] = useState('pengantaran');
+  const [depots, setDepots] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [selectedDepotId, setSelectedDepotId] = useState('');
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState([]);
+  const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
+  const [editingCustomerId, setEditingCustomerId] = useState(null);
+  const [depotForm, setDepotForm] = useState(emptyDepotForm);
+  const [editingDepotId, setEditingDepotId] = useState(null);
+  const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [costMetric, setCostMetric] = useState('duration');
   const [profile, setProfile] = useState('driving');
-
-  const [source, setSource] = useState(null);
-  const [destinations, setDestinations] = useState([]);
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [result, setResult] = useState(null);
+  const [currentDelivery, setCurrentDelivery] = useState(null);
   const [activeAlgorithm, setActiveAlgorithm] = useState('EAMDSP');
-  const [comparisonHistory, setComparisonHistory] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const markerSummary = useMemo(() => {
-    if (!source) return 'Klik peta untuk set source.';
-    if (destinations.length === 0) {
-      return 'Source sudah dipilih. Klik peta lagi untuk menambah destination.';
-    }
-    return `Source + ${destinations.length} destination siap diproses.`;
-  }, [source, destinations]);
+  const selectedCustomers = useMemo(() => {
+    const selectedSet = new Set(selectedCustomerIds);
+    return customers.filter((customer) => selectedSet.has(customer.id));
+  }, [customers, selectedCustomerIds]);
 
-  function handleMapClick(latlng) {
-    const point = { lat: latlng.lat, lng: latlng.lng };
-    if (!source) {
-      setSource(point);
-      setErrorMessage('');
-      return;
-    }
+  useEffect(() => {
+    loadInitialData();
+  }, []);
 
-    setDestinations((prev) => [...prev, point]);
-    setErrorMessage('');
-  }
-
-  function clearAllPoints() {
-    setSource(null);
-    setDestinations([]);
-    setResult(null);
-    setActiveAlgorithm('EAMDSP');
-    setErrorMessage('');
-  }
-
-  function undoLastDestination() {
-    setDestinations((prev) => prev.slice(0, -1));
-    setResult(null);
-  }
-
-  async function runRouting() {
-    if (!source) {
-      setErrorMessage('Source belum dipilih. Klik peta untuk set source terlebih dulu.');
-      return;
-    }
-    if (destinations.length === 0) {
-      setErrorMessage('Tambahkan minimal satu destination sebelum menjalankan algoritma.');
-      return;
-    }
-
-    setErrorMessage('');
+  async function loadInitialData() {
     setIsLoading(true);
-
+    setErrorMessage('');
     try {
-      const response = await fetch(`${API_BASE_URL}/api/solve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          cost_metric: costMetric,
-          profile,
-          source,
-          destinations,
-        }),
-      });
+      const [depotPayload, customerPayload, historyPayload] = await Promise.all([
+        apiFetch('/depot-galon'),
+        apiFetch('/pelanggan'),
+        apiFetch('/pengantaran'),
+      ]);
 
-      const payload = await response.json();
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || `Request gagal dengan status ${response.status}`);
+      const loadedDepots = depotPayload.data || [];
+      setDepots(loadedDepots);
+      setCustomers(customerPayload.data || []);
+      setHistory(historyPayload.data || []);
+      if (loadedDepots.length > 0) {
+        setSelectedDepotId(String(loadedDepots[0].id));
       }
-
-      setResult(payload.data);
-      setComparisonHistory((prev) => {
-        const costByAlgorithm = {};
-        const distanceByAlgorithm = {};
-        for (const item of payload.data.results || []) {
-          if (typeof item?.total_cost === 'number') {
-            costByAlgorithm[item.algorithm] = item.total_cost;
-          }
-          const totalDistanceM = (item?.segments || []).reduce((sum, segment) => {
-            if (typeof segment?.distance_m !== 'number') return sum;
-            return sum + segment.distance_m;
-          }, 0);
-          distanceByAlgorithm[item.algorithm] = totalDistanceM;
-        }
-
-        const entry = {
-          metric: payload.data.cost_metric,
-          itemCount: destinations.length,
-          costByAlgorithm,
-          distanceByAlgorithm,
-        };
-        return [...prev, entry];
-      });
-      const defaultAlgorithm = payload.data.best_by_total_cost || payload.data.algorithms?.[0] || 'EAMDSP';
-      setActiveAlgorithm(defaultAlgorithm);
     } catch (error) {
-      setResult(null);
-      setActiveAlgorithm('EAMDSP');
-      setErrorMessage(error.message || 'Terjadi error saat memproses route.');
+      setErrorMessage(error.message);
     } finally {
       setIsLoading(false);
     }
   }
 
-  const activeResult = useMemo(() => {
-    if (!result || !Array.isArray(result.results)) return null;
-    return result.results.find((item) => item.algorithm === activeAlgorithm) || result.results[0] || null;
-  }, [result, activeAlgorithm]);
+  async function reloadCustomers() {
+    const payload = await apiFetch('/pelanggan');
+    setCustomers(payload.data || []);
+  }
 
-  const resultsWithDistance = useMemo(() => {
-    if (!result || !Array.isArray(result.results)) return [];
-    return result.results.map((item) => {
-      const totalDistanceM = (item.segments || []).reduce((sum, segment) => {
-        if (typeof segment?.distance_m !== 'number') return sum;
-        return sum + segment.distance_m;
-      }, 0);
-      return {
-        ...item,
-        total_distance_m: totalDistanceM,
-      };
+  async function reloadDepots() {
+    const payload = await apiFetch('/depot-galon');
+    const loadedDepots = payload.data || [];
+    setDepots(loadedDepots);
+    if (!selectedDepotId && loadedDepots.length > 0) {
+      setSelectedDepotId(String(loadedDepots[0].id));
+    }
+  }
+
+  async function reloadHistory() {
+    const payload = await apiFetch('/pengantaran');
+    setHistory(payload.data || []);
+  }
+
+  function resetCustomerForm() {
+    setCustomerForm(emptyCustomerForm);
+    setEditingCustomerId(null);
+  }
+
+  function resetDepotForm() {
+    setDepotForm(emptyDepotForm);
+    setEditingDepotId(null);
+  }
+
+  async function saveCustomer(event) {
+    event.preventDefault();
+    setIsLoading(true);
+    setErrorMessage('');
+    setMessage('');
+
+    const payload = {
+      ...customerForm,
+      latitude: Number(customerForm.latitude),
+      longitude: Number(customerForm.longitude),
+    };
+
+    try {
+      if (editingCustomerId) {
+        await apiFetch(`/pelanggan/${editingCustomerId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        setMessage('Data pelanggan berhasil diperbarui.');
+      } else {
+        await apiFetch('/pelanggan', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        setMessage('Data pelanggan berhasil disimpan.');
+      }
+      resetCustomerForm();
+      await reloadCustomers();
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function editCustomer(customer) {
+    setEditingCustomerId(customer.id);
+    setCustomerForm({
+      nama_pelanggan: customer.nama_pelanggan,
+      alamat: customer.alamat,
+      latitude: numericInput(customer.latitude),
+      longitude: numericInput(customer.longitude),
     });
-  }, [result]);
+    setActiveView('pelanggan');
+  }
 
-  const chartData = useMemo(() => {
-    return comparisonHistory
-      .filter((item) => item.metric === costMetric)
-      .map((item, index) => ({ ...item, label: `Run ${index + 1}` }));
-  }, [comparisonHistory, costMetric]);
+  async function deleteCustomer(customerId) {
+    if (!window.confirm('Hapus pelanggan ini?')) return;
+    setIsLoading(true);
+    setErrorMessage('');
+    setMessage('');
+    try {
+      await apiFetch(`/pelanggan/${customerId}`, { method: 'DELETE' });
+      setSelectedCustomerIds((prev) => prev.filter((id) => id !== customerId));
+      setMessage('Pelanggan berhasil dihapus.');
+      await reloadCustomers();
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function saveDepot(event) {
+    event.preventDefault();
+    setIsLoading(true);
+    setErrorMessage('');
+    setMessage('');
+
+    const payload = {
+      ...depotForm,
+      latitude: Number(depotForm.latitude),
+      longitude: Number(depotForm.longitude),
+    };
+
+    try {
+      if (editingDepotId) {
+        await apiFetch(`/depot-galon/${editingDepotId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        setMessage('Data depot berhasil diperbarui.');
+      } else {
+        const response = await apiFetch('/depot-galon', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        setSelectedDepotId(String(response.data.id));
+        setMessage('Data depot berhasil disimpan.');
+      }
+      resetDepotForm();
+      await reloadDepots();
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function editDepot(depot) {
+    setEditingDepotId(depot.id);
+    setDepotForm({
+      nama_depot: depot.nama_depot,
+      alamat: depot.alamat,
+      latitude: numericInput(depot.latitude),
+      longitude: numericInput(depot.longitude),
+    });
+  }
+
+  function toggleCustomerSelection(customerId) {
+    setSelectedCustomerIds((prev) =>
+      prev.includes(customerId) ? prev.filter((id) => id !== customerId) : [...prev, customerId]
+    );
+  }
+
+  async function createDelivery() {
+    if (!selectedDepotId) {
+      setErrorMessage('Pilih depot terlebih dahulu.');
+      return;
+    }
+    if (selectedCustomerIds.length === 0) {
+      setErrorMessage('Pilih minimal satu pelanggan tujuan.');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+    setMessage('');
+
+    try {
+      const payload = await apiFetch('/pengantaran', {
+        method: 'POST',
+        body: JSON.stringify({
+          depot_id: Number(selectedDepotId),
+          tanggal_pengantaran: deliveryDate,
+          pelanggan_ids: selectedCustomerIds,
+          cost_metric: costMetric,
+          profile,
+        }),
+      });
+
+      setCurrentDelivery(payload.data);
+      setActiveAlgorithm(payload.data.best_by_total_cost || 'EAMDSP');
+      setMessage('Pengantaran dibuat. Hasil 3 algoritma sudah tersimpan di riwayat.');
+      await reloadHistory();
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function openHistoryItem(historyId) {
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const payload = await apiFetch(`/pengantaran/${historyId}`);
+      setCurrentDelivery(payload.data);
+      setActiveAlgorithm(payload.data.best_by_total_cost || 'EAMDSP');
+      setActiveView('riwayat');
+    } catch (error) {
+      setErrorMessage(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   return (
-    <div className="page-shell">
-      <header className="top-header">
-        <h1>Outdoor Multi-Destination Routing</h1>
-        <p>
-          Klik peta untuk memilih source dan destination, lalu jalankan perbandingan otomatis
-          <code>CDSSSD</code>, <code>MDMSMD</code>, dan <code>EAMDSP</code>.
-        </p>
+    <div className="app-shell">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">Sistem Informasi Depot Air</p>
+          <h1>Pengelolaan Pelanggan dan Rute Pengantaran</h1>
+        </div>
+        <div className="header-actions">
+          <button className="btn" onClick={loadInitialData} disabled={isLoading}>
+            Refresh
+          </button>
+        </div>
       </header>
 
-      <main className="layout-grid">
-        <section className="control-panel card">
-          <h2>Control Panel</h2>
+      <nav className="tabs">
+        <button className={activeView === 'pengantaran' ? 'is-active' : ''} onClick={() => setActiveView('pengantaran')}>
+          Pengantaran
+        </button>
+        <button className={activeView === 'pelanggan' ? 'is-active' : ''} onClick={() => setActiveView('pelanggan')}>
+          Pelanggan
+        </button>
+        <button className={activeView === 'riwayat' ? 'is-active' : ''} onClick={() => setActiveView('riwayat')}>
+          Riwayat
+        </button>
+      </nav>
 
-          <label>
-            Cost Metric
-            <select value={costMetric} onChange={(event) => setCostMetric(event.target.value)}>
-              <option value="duration">Duration (detik)</option>
-              <option value="distance">Distance (meter)</option>
-              <option value="ongkir">Ongkir (Rupiah)</option>
-            </select>
-          </label>
+      {(message || errorMessage) && (
+        <div className={errorMessage ? 'notice error' : 'notice'}>
+          {errorMessage || message}
+        </div>
+      )}
 
-          <label>
-            Profile
-            <input
-              value={profile}
-              onChange={(event) => setProfile(event.target.value)}
-              placeholder="driving"
-            />
-          </label>
+      <section className="metric-grid">
+        <div>
+          <span>Total Depot</span>
+          <strong>{depots.length}</strong>
+        </div>
+        <div>
+          <span>Total Pelanggan</span>
+          <strong>{customers.length}</strong>
+        </div>
+        <div>
+          <span>Riwayat Pengantaran</span>
+          <strong>{history.length}</strong>
+        </div>
+        <div>
+          <span>Pelanggan Dipilih</span>
+          <strong>{selectedCustomerIds.length}</strong>
+        </div>
+      </section>
 
-          <div className="inline-actions">
-            <button className="btn btn-primary" onClick={runRouting} disabled={isLoading}>
-              {isLoading ? 'Memproses...' : 'Run Perbandingan 3 Algoritma'}
-            </button>
-            <button className="btn" onClick={undoLastDestination} disabled={destinations.length === 0}>
-              Undo Destination
-            </button>
-            <button className="btn btn-danger" onClick={clearAllPoints}>
-              Reset
-            </button>
-          </div>
+      {activeView === 'pengantaran' && (
+        <>
+          <main className="work-grid">
+            <section className="panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Buat Pengantaran</p>
+                  <h2>Pilih depot dan pelanggan tujuan</h2>
+                </div>
+              </div>
 
-          <div className="hint-box">
-            <strong>Status titik:</strong>
-            <p>{markerSummary}</p>
-            <p>History tersimpan sampai aplikasi di-reload.</p>
-          </div>
+              <label>
+                Depot awal
+                <select value={selectedDepotId} onChange={(event) => setSelectedDepotId(event.target.value)}>
+                  <option value="">Pilih depot</option>
+                  {depots.map((depot) => (
+                    <option key={depot.id} value={depot.id}>
+                      {depot.nama_depot}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-          {errorMessage && (
-            <div className="error-box">
-              <strong>Error</strong>
-              <p>{errorMessage}</p>
+              <div className="two-columns">
+                <label>
+                  Tanggal
+                  <input value={deliveryDate} type="date" onChange={(event) => setDeliveryDate(event.target.value)} />
+                </label>
+                <label>
+                  Cost metric
+                  <select value={costMetric} onChange={(event) => setCostMetric(event.target.value)}>
+                    <option value="duration">Duration</option>
+                    <option value="distance">Distance</option>
+                    <option value="ongkir">Ongkir</option>
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                Profile OSRM
+                <input value={profile} onChange={(event) => setProfile(event.target.value)} />
+              </label>
+
+              <div className="customer-select-list">
+                {customers.map((customer) => (
+                  <label key={`select-${customer.id}`} className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={selectedCustomerIds.includes(customer.id)}
+                      onChange={() => toggleCustomerSelection(customer.id)}
+                    />
+                    <span>
+                      <strong>{customer.nama_pelanggan}</strong>
+                      <small>{customer.alamat}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              <button className="btn btn-primary full-width" onClick={createDelivery} disabled={isLoading}>
+                {isLoading ? 'Memproses...' : 'Hitung 3 Algoritma dan Simpan Riwayat'}
+              </button>
+            </section>
+
+            <section className="panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">Pelanggan Terpilih</p>
+                  <h2>{selectedCustomers.length} tujuan pengantaran</h2>
+                </div>
+              </div>
+              <div className="selected-list">
+                {selectedCustomers.length === 0 && <p className="muted">Belum ada pelanggan dipilih.</p>}
+                {selectedCustomers.map((customer, index) => (
+                  <article key={`selected-${customer.id}`}>
+                    <span>{index + 1}</span>
+                    <div>
+                      <strong>{customer.nama_pelanggan}</strong>
+                      <p>{customer.alamat}</p>
+                      <small>
+                        {customer.latitude}, {customer.longitude}
+                      </small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </main>
+
+          <ComparisonPanel
+            delivery={currentDelivery}
+            activeAlgorithm={activeAlgorithm}
+            onActiveAlgorithmChange={setActiveAlgorithm}
+          />
+        </>
+      )}
+
+      {activeView === 'pelanggan' && (
+        <main className="work-grid">
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Master Depot</p>
+                <h2>Data titik awal pengantaran</h2>
+              </div>
             </div>
-          )}
 
-          {result && (
-            <div className="result-summary">
-              <h3>Ringkasan Perbandingan</h3>
-              <p>
-                <strong>Best Total Cost:</strong> {result.best_by_total_cost}
-              </p>
-              <p>
-                <strong>Best Total Visited Nodes:</strong> {result.best_by_total_visited_nodes}
-              </p>
+            <form onSubmit={saveDepot} className="form-stack">
+              <input
+                placeholder="Nama depot"
+                value={depotForm.nama_depot}
+                onChange={(event) => setDepotForm((prev) => ({ ...prev, nama_depot: event.target.value }))}
+              />
+              <textarea
+                placeholder="Alamat depot"
+                value={depotForm.alamat}
+                onChange={(event) => setDepotForm((prev) => ({ ...prev, alamat: event.target.value }))}
+              />
+              <div className="two-columns">
+                <input
+                  placeholder="Latitude"
+                  value={depotForm.latitude}
+                  onChange={(event) => setDepotForm((prev) => ({ ...prev, latitude: event.target.value }))}
+                />
+                <input
+                  placeholder="Longitude"
+                  value={depotForm.longitude}
+                  onChange={(event) => setDepotForm((prev) => ({ ...prev, longitude: event.target.value }))}
+                />
+              </div>
+              <div className="inline-actions">
+                <button className="btn btn-primary" type="submit" disabled={isLoading}>
+                  {editingDepotId ? 'Update Depot' : 'Simpan Depot'}
+                </button>
+                {editingDepotId && (
+                  <button className="btn" type="button" onClick={resetDepotForm}>
+                    Batal
+                  </button>
+                )}
+              </div>
+            </form>
 
-              <table className="comparison-table">
+            <div className="compact-list">
+              {depots.map((depot) => (
+                <article key={depot.id}>
+                  <div>
+                    <strong>{depot.nama_depot}</strong>
+                    <p>{depot.alamat}</p>
+                  </div>
+                  <button className="btn" onClick={() => editDepot(depot)}>
+                    Edit
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Master Pelanggan</p>
+                <h2>Data pelanggan tersimpan</h2>
+              </div>
+            </div>
+
+            <form onSubmit={saveCustomer} className="form-stack">
+              <input
+                placeholder="Nama pelanggan"
+                value={customerForm.nama_pelanggan}
+                onChange={(event) => setCustomerForm((prev) => ({ ...prev, nama_pelanggan: event.target.value }))}
+              />
+              <textarea
+                placeholder="Alamat lengkap"
+                value={customerForm.alamat}
+                onChange={(event) => setCustomerForm((prev) => ({ ...prev, alamat: event.target.value }))}
+              />
+              <div className="two-columns">
+                <input
+                  placeholder="Latitude"
+                  value={customerForm.latitude}
+                  onChange={(event) => setCustomerForm((prev) => ({ ...prev, latitude: event.target.value }))}
+                />
+                <input
+                  placeholder="Longitude"
+                  value={customerForm.longitude}
+                  onChange={(event) => setCustomerForm((prev) => ({ ...prev, longitude: event.target.value }))}
+                />
+              </div>
+              <div className="inline-actions">
+                <button className="btn btn-primary" type="submit" disabled={isLoading}>
+                  {editingCustomerId ? 'Update Pelanggan' : 'Simpan Pelanggan'}
+                </button>
+                {editingCustomerId && (
+                  <button className="btn" type="button" onClick={resetCustomerForm}>
+                    Batal
+                  </button>
+                )}
+              </div>
+            </form>
+
+            <div className="table-wrap">
+              <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Algorithm</th>
-                    <th>Total Cost</th>
-                    <th>Total KM</th>
-                    <th>Visited Nodes</th>
+                    <th>Nama</th>
+                    <th>Alamat</th>
+                    <th>Koordinat</th>
+                    <th>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {resultsWithDistance.map((item) => (
-                    <tr
-                      key={`compare-${item.algorithm}`}
-                      className={item.algorithm === activeAlgorithm ? 'is-active' : ''}
-                      onClick={() => setActiveAlgorithm(item.algorithm)}
-                    >
-                      <td>{item.algorithm}</td>
-                      <td>{formatCost(item.total_cost, result.cost_metric)}</td>
-                      <td>{formatKilometersFromMeters(item.total_distance_m)}</td>
-                      <td>{item.total_visited_nodes}</td>
+                  {customers.map((customer) => (
+                    <tr key={customer.id}>
+                      <td>{customer.nama_pelanggan}</td>
+                      <td>{customer.alamat}</td>
+                      <td>
+                        {customer.latitude}, {customer.longitude}
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <button className="btn" onClick={() => editCustomer(customer)}>
+                            Edit
+                          </button>
+                          <button className="btn btn-danger" onClick={() => deleteCustomer(customer.id)}>
+                            Hapus
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </section>
+          </section>
+        </main>
+      )}
 
-        <section className="map-panel card">
-          <MapContainer center={DEFAULT_CENTER} zoom={16} scrollWheelZoom className="leaflet-map">
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <MapClickHandler onMapClick={handleMapClick} />
-
-            {source && (
-              <CircleMarker
-                center={[source.lat, source.lng]}
-                radius={10}
-                pathOptions={{ color: '#0d9488', fillColor: '#14b8a6', fillOpacity: 0.95, weight: 3 }}
-              >
-                <Tooltip direction="top" permanent>
-                  S
-                </Tooltip>
-              </CircleMarker>
-            )}
-
-            {destinations.map((point, index) => (
-              <CircleMarker
-                key={`destination-${index}-${point.lat}-${point.lng}`}
-                center={[point.lat, point.lng]}
-                radius={9}
-                pathOptions={{ color: '#f97316', fillColor: '#fb923c', fillOpacity: 0.92, weight: 2 }}
-              >
-                <Tooltip direction="top" permanent>
-                  D{index + 1}
-                </Tooltip>
-              </CircleMarker>
-            ))}
-
-            {activeResult?.segments?.map((segment, index) => {
-              const positions =
-                Array.isArray(segment.geometry) && segment.geometry.length > 0
-                  ? segment.geometry
-                  : [
-                      [segment.from.lat, segment.from.lng],
-                      [segment.to.lat, segment.to.lng],
-                    ];
-              return (
-                <Polyline
-                  key={`segment-${index}`}
-                  positions={positions}
-                  pathOptions={{
-                    color: ROUTE_COLORS[index % ROUTE_COLORS.length],
-                    weight: 5,
-                    opacity: 0.86,
-                  }}
-                />
-              );
-            })}
-          </MapContainer>
-
-          {activeResult && (
-            <div className="segment-list">
-              <h3>
-                Segments ({activeResult.algorithm}) | Visit Order:{' '}
-                {activeResult.visit_order?.map((point) => point.id).join(' -> ') || '-'}
-              </h3>
-              {activeResult.segments.map((segment, index) => (
-                <article className="segment-item" key={`segment-item-${index}`}>
-                  <h4>
-                    {index + 1}. {segment.from.id} → {segment.to.id}
-                  </h4>
-                  <p>
-                    Cost: {formatCost(segment.cost, result.cost_metric)} | Distance:{' '}
-                    {formatDistance(segment.distance_m)} | Duration: {formatDuration(segment.duration_s)}
-                  </p>
-                  <p>Visited nodes: {segment.visited_nodes}</p>
-                </article>
-              ))}
+      {activeView === 'riwayat' && (
+        <>
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Riwayat</p>
+                <h2>Pengantaran yang sudah tersimpan</h2>
+              </div>
             </div>
-          )}
-        </section>
-      </main>
 
-      <CostComparisonChart dataPoints={chartData} costMetric={costMetric} />
-
-      {comparisonHistory.length > 0 && (
-        <section className="history-panel card">
-          <h3>Semua History Run</h3>
-          <div className="history-table-wrap">
-            <table className="comparison-table">
-              <thead>
-                <tr>
-                  <th>Run</th>
-                  <th>Items</th>
-                  <th>Metric</th>
-                  <th>EAMDSP</th>
-                  <th>CDSSSD</th>
-                  <th>MDMSMD</th>
-                  <th>EAMDSP KM</th>
-                  <th>CDSSSD KM</th>
-                  <th>MDMSMD KM</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparisonHistory.map((entry, index) => (
-                  <tr key={`history-${index}`}>
-                    <td>{index + 1}</td>
-                    <td>{entry.itemCount}</td>
-                    <td>{entry.metric}</td>
-                    <td>{formatCost(entry.costByAlgorithm.EAMDSP, entry.metric)}</td>
-                    <td>{formatCost(entry.costByAlgorithm.CDSSSD, entry.metric)}</td>
-                    <td>{formatCost(entry.costByAlgorithm.MDMSMD, entry.metric)}</td>
-                    <td>{formatKilometersFromMeters(entry.distanceByAlgorithm?.EAMDSP)}</td>
-                    <td>{formatKilometersFromMeters(entry.distanceByAlgorithm?.CDSSSD)}</td>
-                    <td>{formatKilometersFromMeters(entry.distanceByAlgorithm?.MDMSMD)}</td>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Tanggal</th>
+                    <th>Depot</th>
+                    <th>Tujuan</th>
+                    <th>Best Cost</th>
+                    <th>Total Jarak</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  {history.map((item) => (
+                    <tr key={item.id}>
+                      <td>#{item.id}</td>
+                      <td>{item.tanggal_pengantaran}</td>
+                      <td>{item.depot?.nama_depot || '-'}</td>
+                      <td>{item.pelanggan?.length || 0} pelanggan</td>
+                      <td>{item.best_by_total_cost || '-'}</td>
+                      <td>{formatDistance((item.total_jarak_km || 0) * 1000)}</td>
+                      <td>{item.status}</td>
+                      <td>
+                        <button className="btn" onClick={() => openHistoryItem(item.id)}>
+                          Lihat
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <ComparisonPanel
+            delivery={currentDelivery}
+            activeAlgorithm={activeAlgorithm}
+            onActiveAlgorithmChange={setActiveAlgorithm}
+          />
+        </>
       )}
     </div>
   );

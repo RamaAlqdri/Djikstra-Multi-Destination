@@ -1,6 +1,5 @@
 # Python cache and bytecode
 
-frontend/
 .github/
 
 __pycache__/

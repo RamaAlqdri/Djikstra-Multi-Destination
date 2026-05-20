@@ -1,6 +1,7 @@
-# Backend — Djikstra Multi-Destination (Laravel)
+# Backend — Sistem Informasi Depot Air (Laravel)
 
-Backend API untuk proyek **Shortest Path Algorithms — Multi-Destination** yang dibangun menggunakan **Laravel 12** dengan database **PostgreSQL**.
+Backend API untuk data depot, pelanggan, pengantaran, dan riwayat hasil
+perbandingan algoritma `CDSSSD`, `MDMSMD`, dan `EAMDSP`.
 
 ## Tech Stack
 
@@ -99,6 +100,13 @@ php artisan serve
 
 Server berjalan di `http://localhost:8000` secara default.
 
+Untuk project ini disarankan memakai port `8001` agar tidak bentrok dengan
+Python solver yang berjalan di port `8000`:
+
+```bash
+php artisan serve --host=127.0.0.1 --port=8001
+```
+
 Atau gunakan script `dev` dari Composer (menjalankan server, queue, log watcher, dan Vite secara bersamaan):
 
 ```bash
@@ -154,6 +162,24 @@ Atau via Composer:
 ```bash
 composer run test
 ```
+
+---
+
+## Endpoint Utama
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| `GET` | `/api/depot-galon` | List depot |
+| `POST` | `/api/depot-galon` | Tambah depot |
+| `PUT` | `/api/depot-galon/{id}` | Update depot |
+| `GET` | `/api/pelanggan` | List pelanggan |
+| `POST` | `/api/pelanggan` | Tambah pelanggan |
+| `PUT` | `/api/pelanggan/{id}` | Update pelanggan |
+| `DELETE` | `/api/pelanggan/{id}` | Hapus pelanggan |
+| `POST` | `/api/pengantaran` | Hitung 3 algoritma dan simpan riwayat |
+| `GET` | `/api/pengantaran` | List riwayat |
+| `GET` | `/api/pengantaran/{id}` | Detail riwayat |
+| `PATCH` | `/api/pengantaran/{id}/status` | Update status pengantaran |
 
 ---
 

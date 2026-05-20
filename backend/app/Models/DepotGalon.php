@@ -15,6 +15,11 @@ class DepotGalon extends Model
         'longitude',
     ];
 
+    protected $casts = [
+        'latitude' => 'float',
+        'longitude' => 'float',
+    ];
+
     public function transaksi()
     {
         return $this->hasMany(Transaksi::class, 'depot_id');

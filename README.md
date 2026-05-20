@@ -1,98 +1,78 @@
-# Shortest Path Algorithms Project (Indoor + Outdoor Multi-Destination)
+# Sistem Informasi Depot Air + Multi-Destination Routing
 
-Project ini mengimplementasikan 3 algoritma shortest path dari jurnal:
-**“An Efficient Shortest Path Algorithm: Multi-Destinations in an Indoor Environment”**.
+Project ini menggabungkan sistem informasi depot air galon dengan perbandingan
+algoritma shortest path multi-destination.
 
-Algoritma yang tersedia:
+Fitur utama:
 
-1. **CDSSSD** (Conventional Dijkstra Single Source Single Destination)
-2. **MDMSMD** (Modified Dijkstra Multi-Source Multi-Destination)
-3. **EAMDSP** (Efficient Algorithm for Multi-Destination Shortest Path)
+- Master data depot galon sebagai titik awal pengantaran.
+- Master data pelanggan berisi nama, alamat, latitude, dan longitude.
+- Pemilik depot memilih pelanggan yang akan diantar.
+- Sistem menjalankan 3 algoritma sekaligus: `CDSSSD`, `MDMSMD`, dan `EAMDSP`.
+- Hasil perbandingan ditampilkan di frontend dan disimpan ke riwayat pengantaran.
+- Detail riwayat dapat dibuka ulang untuk melihat tabel perbandingan dan rute peta.
 
 ## Struktur Project
 
-- `algorithms.py`: modul reusable helper + Dijkstra + 3 algoritma utama.
-- `cdsssd.ipynb`: notebook fokus CDSSSD.
-- `mdmsmd.ipynb`: notebook fokus MDMSMD.
-- `eamdsp.ipynb`: notebook fokus EAMDSP.
-- `comparison.ipynb`: perbandingan ketiga algoritma pada input yang sama.
-- `tests.ipynb`: notebook test (`unittest`) untuk edge case utama.
-- `outdoor_server.py`: backend API outdoor; fetch jarak/rute dari OSRM, lalu menjalankan algoritma multi-destination.
-- `frontend/`: React + Leaflet untuk ilustrasi map outdoor interaktif.
+- `algorithms.py`: modul reusable Dijkstra + CDSSSD + MDMSMD + EAMDSP.
+- `outdoor_server.py`: Python routing solver API. Mengambil matrix/rute dari OSRM.
+- `backend/`: Laravel API untuk data depot, pelanggan, pengantaran, dan riwayat.
+- `frontend/`: React + Leaflet dashboard sistem informasi depot air.
+- `*.ipynb`: notebook pembelajaran dan pembanding algoritma.
 
-## Bagian 1: Notebook Indoor
+## Arsitektur Runtime
 
-### Kebutuhan
+Frontend tidak lagi memanggil Python solver secara langsung.
 
-- Python 3.10+
-- Jupyter Notebook / JupyterLab
+Alur pengantaran:
 
-### Menjalankan
+1. User memilih depot dan beberapa pelanggan di frontend.
+2. Frontend mengirim request ke Laravel API.
+3. Laravel mengambil data koordinat dari database.
+4. Laravel memanggil Python solver `/api/solve`.
+5. Python solver menjalankan `CDSSSD`, `MDMSMD`, dan `EAMDSP`.
+6. Laravel menyimpan semua hasil algoritma ke riwayat.
+7. Frontend menampilkan tabel perbandingan dan map rute.
 
-```bash
-jupyter notebook
-```
+## Menjalankan
 
-Lalu jalankan notebook dari atas ke bawah:
-
-- `cdsssd.ipynb`
-- `mdmsmd.ipynb`
-- `eamdsp.ipynb`
-- `comparison.ipynb`
-- `tests.ipynb`
-
-## Bagian 2: Outdoor Map (React + Leaflet + OSRM)
-
-Arsitektur:
-
-- Frontend Leaflet untuk pilih titik source/destination pada peta.
-- Backend Python fetch **cost matrix** dan **route geometry** dari OSRM.
-- Backend menjalankan `CDSSSD` / `MDMSMD` / `EAMDSP` di atas graph berbobot dari hasil OSRM.
-
-### 2.1 Jalankan Backend API
+### 1. Python Solver
 
 ```bash
 python3 outdoor_server.py --host 127.0.0.1 --port 8000
 ```
 
-Endpoint:
+Endpoint solver:
 
 - `GET /health`
 - `POST /api/solve`
 
-Contoh payload `POST /api/solve`:
+### 2. Laravel API
 
-```json
-{
-  "cost_metric": "duration",
-  "profile": "driving",
-  "source": { "lat": -6.2000, "lng": 106.8166 },
-  "destinations": [
-    { "lat": -6.2012, "lng": 106.8221 },
-    { "lat": -6.2140, "lng": 106.8450 }
-  ]
-}
+```bash
+cd backend
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate --seed
+php artisan serve --host=127.0.0.1 --port=8001
 ```
 
-Catatan perilaku endpoint:
-- Backend akan **selalu menjalankan ketiga algoritma** (`CDSSSD`, `MDMSMD`, `EAMDSP`) dalam satu request.
-- Response berisi `results` untuk masing-masing algoritma + ringkasan pembanding seperti `best_by_total_cost`.
-- `cost_metric` mendukung: `duration`, `distance`, dan `ongkir`.
-- Untuk `ongkir`, bobot dihitung dari jarak OSRM:
-  - <= 1 km: Rp 6.000
-  - > 1 km: Rp 6.000 + Rp 2.500 per km berikutnya (pro-rata).
+Pastikan `.env` Laravel memuat:
 
-Catatan:
+```env
+ROUTING_SOLVER_URL=http://127.0.0.1:8000
+```
 
-- Default OSRM provider: `https://router.project-osrm.org`
-- Bisa override dengan env `OSRM_BASE_URL` atau argumen `--osrm-base-url`
-- Mode `driving` menghormati one-way road
-- Jika environment lokal bermasalah dengan CA certificate HTTPS, jalankan:
-  `python3 outdoor_server.py --insecure-skip-tls-verify`
+Endpoint utama Laravel:
 
-### 2.2 Jalankan Frontend
+- `GET|POST /api/depot-galon`
+- `GET|POST|PUT|DELETE /api/pelanggan`
+- `GET|POST /api/pengantaran`
+- `GET /api/pengantaran/{id}`
+- `PATCH /api/pengantaran/{id}/status`
 
-Masuk folder frontend:
+### 3. Frontend
 
 ```bash
 cd frontend
@@ -103,32 +83,21 @@ npm run dev
 
 Default URL frontend: `http://127.0.0.1:5173`
 
-## Catatan Implementasi Algoritma
+Pastikan `.env` frontend:
 
-- Graph memakai adjacency list.
-- Edge weight wajib non-negatif.
-- Jika destination tidak terjangkau, sistem melempar `PathNotFoundError`.
-- Jika `source` muncul di destinations, segmen tersebut diproses aman (`cost = 0`, path satu node).
-- Destination duplikat dipertahankan sebagai request terpisah.
-- Penggabungan sub-path menghindari duplikasi node sambungan.
-
-## Contoh Format Return (Core Algorithm)
-
-```python
-{
-    "algorithm": "EAMDSP",
-    "full_path": ["A", "C", "F", "E"],
-    "segments": [
-        {
-            "from": "A",
-            "to": "C",
-            "path": ["A", "B", "C"],
-            "cost": 5,
-            "visited_nodes": 4
-        }
-    ],
-    "visit_order": ["C", "F", "E"],
-    "total_cost": 33,
-    "total_visited_nodes": 25
-}
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8001/api
 ```
+
+## Catatan Algoritma
+
+- `CDSSSD`: shortest path dari depot ke setiap pelanggan secara independen.
+- `MDMSMD`: mengikuti urutan pelanggan yang dipilih user.
+- `EAMDSP`: greedy nearest-next dari posisi aktif.
+- Untuk outdoor mode, graph solver dibentuk dari matrix antar titik depot/pelanggan
+  hasil OSRM, bukan graph penuh seluruh simpul jalan.
+
+## Validasi
+
+Core algoritma dapat dites dari notebook `tests.ipynb` atau dengan menjalankan
+test Python manual terhadap `algorithms.py`.

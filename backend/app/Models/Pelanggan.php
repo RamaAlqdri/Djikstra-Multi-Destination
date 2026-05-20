@@ -15,6 +15,11 @@ class Pelanggan extends Model
         'longitude',
     ];
 
+    protected $casts = [
+        'latitude' => 'float',
+        'longitude' => 'float',
+    ];
+
     public function transaksiDetail()
     {
         return $this->hasMany(TransaksiDetail::class);
