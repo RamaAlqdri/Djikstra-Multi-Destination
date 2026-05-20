@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OSRM_BASE_URL=https://router.project-osrm.org
+      - OSRM_BASE_URL=http://router.project-osrm.org
 
   frontend:
     build:

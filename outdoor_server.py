@@ -730,8 +730,8 @@ def main() -> None:
     parser.add_argument("--port", default=8000, type=int, help="HTTP port")
     parser.add_argument(
         "--osrm-base-url",
-        default=os.environ.get("OSRM_BASE_URL", "https://router.project-osrm.org"),
-        help="OSRM base URL (default: https://router.project-osrm.org)",
+        default=os.environ.get("OSRM_BASE_URL", "http://router.project-osrm.org"),
+        help="OSRM base URL (default: http://router.project-osrm.org)",
     )
     parser.add_argument(
         "--insecure-skip-tls-verify",

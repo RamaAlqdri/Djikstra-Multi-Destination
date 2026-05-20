@@ -213,7 +213,7 @@ function DeliveryMap({ delivery, activeResult }) {
           pathOptions={{ color: '#ea580c', fillColor: '#fb923c', fillOpacity: 0.94, weight: 2 }}
         >
           <Tooltip direction="top" permanent>
-            {pointId}
+            {customerName(pointId, pointCustomerMap)}
           </Tooltip>
         </CircleMarker>
       ))}

@@ -47,6 +47,14 @@ Endpoint solver:
 - `GET /health`
 - `POST /api/solve`
 
+Default provider OSRM memakai `http://router.project-osrm.org` untuk menghindari
+masalah TLS pada Python bawaan macOS/Xcode. Jika memakai Python modern dengan
+OpenSSL baru, provider bisa diganti ke HTTPS:
+
+```bash
+python3 outdoor_server.py --host 127.0.0.1 --port 8000 --osrm-base-url https://router.project-osrm.org
+```
+
 ### 2. Laravel API
 
 ```bash
