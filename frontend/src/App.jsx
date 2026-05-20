@@ -5,28 +5,32 @@ import {
   Polyline,
   TileLayer,
   Tooltip,
+  useMap,
+  useMapEvents,
 } from 'react-leaflet';
 
 const API_BASE_URL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) ||
   'http://127.0.0.1:8001/api';
 
-const DEFAULT_CENTER = [-7.9529, 112.6145];
+const DEFAULT_DEPOT_LATITUDE = '-7.94244696762181';
+const DEFAULT_DEPOT_LONGITUDE = '112.61640127197477';
+const DEFAULT_CENTER = [Number(DEFAULT_DEPOT_LATITUDE), Number(DEFAULT_DEPOT_LONGITUDE)];
 const ALGORITHM_ORDER = ['CDSSSD', 'MDMSMD', 'EAMDSP'];
 const ROUTE_COLORS = ['#d7263d', '#f46036', '#2e294e', '#1b998b', '#e2c044', '#6a4c93'];
 
 const emptyCustomerForm = {
   nama_pelanggan: '',
   alamat: '',
-  latitude: '',
-  longitude: '',
+  latitude: DEFAULT_DEPOT_LATITUDE,
+  longitude: DEFAULT_DEPOT_LONGITUDE,
 };
 
 const emptyDepotForm = {
-  nama_depot: '',
+  nama_depot: 'Depot Galon Pusat',
   alamat: '',
-  latitude: '',
-  longitude: '',
+  latitude: DEFAULT_DEPOT_LATITUDE,
+  longitude: DEFAULT_DEPOT_LONGITUDE,
 };
 
 function formatDistance(meters) {
@@ -62,6 +66,14 @@ function formatCost(value, metric) {
 function numericInput(value) {
   if (value === '' || value === null || value === undefined) return '';
   return String(value);
+}
+
+function parseCoordinate(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 async function apiFetch(path, options = {}) {
@@ -101,6 +113,70 @@ function visitOrderText(result, pointCustomerMap) {
 
 function algorithmSort(a, b) {
   return ALGORITHM_ORDER.indexOf(a.algorithm) - ALGORITHM_ORDER.indexOf(b.algorithm);
+}
+
+function CoordinateClickHandler({ onSelect }) {
+  useMapEvents({
+    click(event) {
+      onSelect({
+        latitude: event.latlng.lat.toFixed(7),
+        longitude: event.latlng.lng.toFixed(7),
+      });
+    },
+  });
+
+  return null;
+}
+
+function MapRecenter({ center, zoom }) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.setView(center, zoom);
+  }, [center, map, zoom]);
+
+  return null;
+}
+
+function CoordinatePicker({ label, latitude, longitude, onSelect }) {
+  const selectedPoint = parseCoordinate(latitude, longitude);
+  const center = selectedPoint ? [selectedPoint.lat, selectedPoint.lng] : DEFAULT_CENTER;
+  const zoom = selectedPoint ? 16 : 13;
+
+  return (
+    <div className="coordinate-picker">
+      <div className="coordinate-picker-header">
+        <strong>{label}</strong>
+        <span>Klik peta untuk mengisi latitude dan longitude.</span>
+      </div>
+
+      <MapContainer center={center} zoom={zoom} scrollWheelZoom className="coordinate-map">
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <MapRecenter center={center} zoom={zoom} />
+        <CoordinateClickHandler onSelect={onSelect} />
+        {selectedPoint && (
+          <CircleMarker
+            center={[selectedPoint.lat, selectedPoint.lng]}
+            radius={9}
+            pathOptions={{ color: '#0f766e', fillColor: '#14b8a6', fillOpacity: 0.95, weight: 3 }}
+          >
+            <Tooltip direction="top" permanent>
+              Titik
+            </Tooltip>
+          </CircleMarker>
+        )}
+      </MapContainer>
+
+      <p className="coordinate-values">
+        {selectedPoint
+          ? `${selectedPoint.lat.toFixed(7)}, ${selectedPoint.lng.toFixed(7)}`
+          : 'Belum ada titik dipilih.'}
+      </p>
+    </div>
+  );
 }
 
 function DeliveryMap({ delivery, activeResult }) {
@@ -685,6 +761,12 @@ function App() {
                 value={depotForm.alamat}
                 onChange={(event) => setDepotForm((prev) => ({ ...prev, alamat: event.target.value }))}
               />
+              <CoordinatePicker
+                label="Pilih lokasi depot"
+                latitude={depotForm.latitude}
+                longitude={depotForm.longitude}
+                onSelect={(coordinates) => setDepotForm((prev) => ({ ...prev, ...coordinates }))}
+              />
               <div className="two-columns">
                 <input
                   placeholder="Latitude"
@@ -742,6 +824,12 @@ function App() {
                 placeholder="Alamat lengkap"
                 value={customerForm.alamat}
                 onChange={(event) => setCustomerForm((prev) => ({ ...prev, alamat: event.target.value }))}
+              />
+              <CoordinatePicker
+                label="Pilih lokasi pelanggan"
+                latitude={customerForm.latitude}
+                longitude={customerForm.longitude}
+                onSelect={(coordinates) => setCustomerForm((prev) => ({ ...prev, ...coordinates }))}
               />
               <div className="two-columns">
                 <input

@@ -184,6 +184,40 @@ textarea {
   gap: 10px;
 }
 
+.coordinate-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.coordinate-picker-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.coordinate-picker-header strong {
+  color: var(--ink);
+}
+
+.coordinate-picker-header span,
+.coordinate-values {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.coordinate-map {
+  width: 100%;
+  height: 260px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.coordinate-values {
+  margin: 0 0 4px;
+}
+
 .inline-actions,
 .row-actions {
   display: flex;

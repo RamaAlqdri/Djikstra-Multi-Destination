@@ -12,9 +12,9 @@ class DepotGalonSeeder extends Seeder
         DepotGalon::updateOrCreate(
             ['nama_depot' => 'Depot Galon Pusat'],
             [
-                'alamat' => 'Jl. Veteran No.1, Ketawanggede, Kec. Lowokwaru, Kota Malang, Jawa Timur 65145',
-                'latitude' => -7.9374811,
-                'longitude' => 112.6144279,
+                'alamat' => 'Titik pusat toko depot air',
+                'latitude' => -7.94244696762181,
+                'longitude' => 112.61640127197477,
             ]
         );
     }
