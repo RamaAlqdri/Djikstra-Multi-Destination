@@ -595,9 +595,12 @@ function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div>
+        <div className="header-main">
           <p className="eyebrow">Sistem Informasi Depot Air</p>
           <h1>Pengelolaan Pelanggan dan Rute Pengantaran</h1>
+          <p className="header-subtitle">
+            Operasional depot, perencanaan rute, dan evaluasi 3 algoritma dalam satu dashboard.
+          </p>
         </div>
         <div className="header-actions">
           <button className="btn" onClick={loadInitialData} disabled={isLoading}>
@@ -607,13 +610,22 @@ function App() {
       </header>
 
       <nav className="tabs">
-        <button className={activeView === 'pengantaran' ? 'is-active' : ''} onClick={() => setActiveView('pengantaran')}>
+        <button
+          className={activeView === 'pengantaran' ? 'tab-btn is-active' : 'tab-btn'}
+          onClick={() => setActiveView('pengantaran')}
+        >
           Pengantaran
         </button>
-        <button className={activeView === 'pelanggan' ? 'is-active' : ''} onClick={() => setActiveView('pelanggan')}>
+        <button
+          className={activeView === 'pelanggan' ? 'tab-btn is-active' : 'tab-btn'}
+          onClick={() => setActiveView('pelanggan')}
+        >
           Pelanggan
         </button>
-        <button className={activeView === 'riwayat' ? 'is-active' : ''} onClick={() => setActiveView('riwayat')}>
+        <button
+          className={activeView === 'riwayat' ? 'tab-btn is-active' : 'tab-btn'}
+          onClick={() => setActiveView('riwayat')}
+        >
           Riwayat
         </button>
       </nav>
@@ -625,19 +637,19 @@ function App() {
       )}
 
       <section className="metric-grid">
-        <div>
+        <div className="metric-card">
           <span>Total Depot</span>
           <strong>{depots.length}</strong>
         </div>
-        <div>
+        <div className="metric-card">
           <span>Total Pelanggan</span>
           <strong>{customers.length}</strong>
         </div>
-        <div>
+        <div className="metric-card">
           <span>Riwayat Pengantaran</span>
           <strong>{history.length}</strong>
         </div>
-        <div>
+        <div className="metric-card">
           <span>Pelanggan Dipilih</span>
           <strong>{selectedCustomerIds.length}</strong>
         </div>
