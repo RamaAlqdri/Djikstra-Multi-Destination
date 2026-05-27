@@ -1,40 +1,47 @@
 # Sistem Informasi Depot Air + Multi-Destination Routing
 
-Project ini menggabungkan sistem informasi depot air galon dengan perbandingan
-algoritma shortest path multi-destination.
+Project ini sekarang punya implementasi full stack Next.js untuk sistem informasi
+depot air galon dengan perbandingan algoritma shortest path multi-destination.
 
 Fitur utama:
 
 - Master data depot galon sebagai titik awal pengantaran.
 - Master data pelanggan berisi nama, alamat, latitude, dan longitude.
+- Input lokasi depot dan pelanggan lewat peta.
 - Pemilik depot memilih pelanggan yang akan diantar.
 - Sistem menjalankan 3 algoritma sekaligus: `CDSSSD`, `MDMSMD`, dan `EAMDSP`.
-- Hasil perbandingan ditampilkan di frontend dan disimpan ke riwayat pengantaran.
+- Hasil perbandingan ditampilkan dan disimpan ke riwayat pengantaran.
 - Detail riwayat dapat dibuka ulang untuk melihat tabel perbandingan dan rute peta.
 
 ## Struktur Project
 
+- `web/`: aplikasi full stack Next.js. Ini stack utama untuk UI dan API.
 - `algorithms.py`: modul reusable Dijkstra + CDSSSD + MDMSMD + EAMDSP.
 - `outdoor_server.py`: Python routing solver API. Mengambil matrix/rute dari OSRM.
-- `backend/`: Laravel API untuk data depot, pelanggan, pengantaran, dan riwayat.
-- `frontend/`: React + Leaflet dashboard sistem informasi depot air.
 - `*.ipynb`: notebook pembelajaran dan pembanding algoritma.
 
-## Arsitektur Runtime
+## Arsitektur Runtime Utama
 
-Frontend tidak lagi memanggil Python solver secara langsung.
+Alur Next.js full stack:
 
-Alur pengantaran:
-
-1. User memilih depot dan beberapa pelanggan di frontend.
-2. Frontend mengirim request ke Laravel API.
-3. Laravel mengambil data koordinat dari database.
-4. Laravel memanggil Python solver `/api/solve`.
+1. User membuka dashboard Next.js di `web/`.
+2. UI memanggil API internal Next.js (`/api/...`).
+3. API Next.js membaca/menulis data ke PostgreSQL lewat Prisma.
+4. Saat membuat pengantaran, API Next.js memanggil Python solver `/api/solve`.
 5. Python solver menjalankan `CDSSSD`, `MDMSMD`, dan `EAMDSP`.
-6. Laravel menyimpan semua hasil algoritma ke riwayat.
-7. Frontend menampilkan tabel perbandingan dan map rute.
+6. API Next.js menyimpan semua hasil algoritma ke riwayat.
+7. UI menampilkan tabel perbandingan dan peta rute.
 
-## Menjalankan
+## Env Next.js
+
+`web/.env` hanya membutuhkan:
+
+```env
+DATABASE_URL="postgresql://ramadhanial-qadri@127.0.0.1:5432/djikstra_db?schema=public"
+ROUTING_SOLVER_URL="http://127.0.0.1:8000"
+```
+
+## Menjalankan Stack Utama
 
 ### 1. Python Solver
 
@@ -55,47 +62,38 @@ OpenSSL baru, provider bisa diganti ke HTTPS:
 python3 outdoor_server.py --host 127.0.0.1 --port 8000 --osrm-base-url https://router.project-osrm.org
 ```
 
-### 2. Laravel API
+### 2. Next.js Full Stack
 
 ```bash
-cd backend
-composer install
-cp .env.example .env
-php artisan key:generate
-php artisan migrate --seed
-php artisan serve --host=127.0.0.1 --port=8001
+cd web
+npm install
+npm run prisma:generate
+npm run prisma:seed
+npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-Pastikan `.env` Laravel memuat:
+Dashboard: `http://127.0.0.1:3000`
 
-```env
-ROUTING_SOLVER_URL=http://127.0.0.1:8000
+Jika memakai database baru yang belum punya tabel:
+
+```bash
+cd web
+npm run prisma:push
+npm run prisma:seed
 ```
 
-Endpoint utama Laravel:
+Catatan: jangan paksa `prisma:push` ke database existing jika Prisma memberi
+warning akan menghapus tabel yang tidak dikelola oleh schema Next.js.
+
+## Endpoint Next.js
 
 - `GET|POST /api/depot-galon`
-- `GET|POST|PUT|DELETE /api/pelanggan`
+- `GET|PUT|DELETE /api/depot-galon/{id}`
+- `GET|POST /api/pelanggan`
+- `GET|PUT|DELETE /api/pelanggan/{id}`
 - `GET|POST /api/pengantaran`
 - `GET /api/pengantaran/{id}`
 - `PATCH /api/pengantaran/{id}/status`
-
-### 3. Frontend
-
-```bash
-cd frontend
-npm install
-cp .env.example .env
-npm run dev
-```
-
-Default URL frontend: `http://127.0.0.1:5173`
-
-Pastikan `.env` frontend:
-
-```env
-VITE_API_BASE_URL=http://127.0.0.1:8001/api
-```
 
 ## Catatan Algoritma
 
@@ -105,7 +103,14 @@ VITE_API_BASE_URL=http://127.0.0.1:8001/api
 - Untuk outdoor mode, graph solver dibentuk dari matrix antar titik depot/pelanggan
   hasil OSRM, bukan graph penuh seluruh simpul jalan.
 
-## Validasi
+## Docker
 
-Core algoritma dapat dites dari notebook `tests.ipynb` atau dengan menjalankan
-test Python manual terhadap `algorithms.py`.
+```bash
+docker compose up --build
+```
+
+Service yang berjalan:
+
+- `solver`: Python routing solver di port `8000`.
+- `web`: Next.js full stack di port `3000`.
+- `postgres`: database PostgreSQL di port `5432`.

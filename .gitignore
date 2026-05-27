@@ -24,13 +24,14 @@ ENV/
 .coverage.*
 htmlcov/
 
-# Frontend build/deps
-frontend/node_modules/
-frontend/dist/
-frontend/.env
-frontend/.env.local
-frontend/.env.*.local
-frontend/.vite/
+# Next.js full stack app
+web/node_modules/
+web/.next/
+web/out/
+web/.env
+web/.env.local
+web/.env.*.local
+web/prisma/generated/
 
 # OS files
 .DS_Store

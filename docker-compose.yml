@@ -1,23 +1,25 @@
 services:
-  backend:
+  solver:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile.solver
     ports:
       - "8000:8000"
     environment:
       - OSRM_BASE_URL=http://router.project-osrm.org
 
-  frontend:
+  web:
     build:
-      context: ./frontend
+      context: ./web
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
+      - "3000:3000"
     environment:
-      - VITE_API_BASE_URL=http://localhost:8000
+      - DATABASE_URL=postgresql://laravel:secret@postgres:5432/laravel?schema=public
+      - ROUTING_SOLVER_URL=http://solver:8000
     depends_on:
-      - backend
+      - solver
+      - postgres
 
   postgres:
     image: postgres:16-alpine

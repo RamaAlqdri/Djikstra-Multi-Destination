@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model DepotGalon {
+  id          BigInt      @id @default(autoincrement())
+  namaDepot   String      @map("nama_depot")
+  alamat      String
+  latitude    Decimal     @db.Decimal(10, 7)
+  longitude   Decimal     @db.Decimal(10, 7)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  transaksi   Transaksi[]
+
+  @@map("depot_galon")
+}
+
+model Pelanggan {
+  id             BigInt            @id @default(autoincrement())
+  namaPelanggan  String            @map("nama_pelanggan")
+  alamat         String
+  latitude       Decimal           @db.Decimal(10, 7)
+  longitude      Decimal           @db.Decimal(10, 7)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  transaksiItems TransaksiDetail[]
+
+  @@map("pelanggan")
+}
+
+model Transaksi {
+  id                         BigInt                     @id @default(autoincrement())
+  depotId                    BigInt                     @map("depot_id")
+  tanggalPengantaran         DateTime                   @map("tanggal_pengantaran") @db.Date
+  costMetric                 String                     @default("duration") @map("cost_metric")
+  profile                    String                     @default("driving")
+  totalJarakKm               Decimal                    @map("total_jarak_km") @db.Decimal(10, 3)
+  totalDurasiDetik           Decimal?                   @map("total_durasi_detik") @db.Decimal(12, 3)
+  totalOngkir                Decimal?                   @map("total_ongkir") @db.Decimal(14, 2)
+  rute                       Json
+  bestByTotalCost            String?                    @map("best_by_total_cost")
+  bestByTotalVisitedNodes    String?                    @map("best_by_total_visited_nodes")
+  status                     String                     @default("pending")
+  catatan                    String?
+  createdAt                  DateTime                   @default(now()) @map("created_at")
+  updatedAt                  DateTime                   @updatedAt @map("updated_at")
+  depot                      DepotGalon                 @relation(fields: [depotId], references: [id], onDelete: Cascade)
+  detail                     TransaksiDetail[]
+  algorithmResults           TransaksiAlgoritmaResult[]
+
+  @@map("transaksi")
+}
+
+model TransaksiDetail {
+  id                            BigInt     @id @default(autoincrement())
+  transaksiId                   BigInt     @map("transaksi_id")
+  pelangganId                   BigInt     @map("pelanggan_id")
+  pointId                       String?    @map("point_id")
+  urutan                        Int
+  jarakDariTitikSebelumnyaKm    Decimal    @default(0) @map("jarak_dari_titik_sebelumnya_km") @db.Decimal(10, 3)
+  jumlahGalon                   Int        @default(1) @map("jumlah_galon")
+  statusPengantaran             String     @default("belum") @map("status_pengantaran")
+  createdAt                     DateTime   @default(now()) @map("created_at")
+  updatedAt                     DateTime   @updatedAt @map("updated_at")
+  transaksi                     Transaksi  @relation(fields: [transaksiId], references: [id], onDelete: Cascade)
+  pelanggan                     Pelanggan  @relation(fields: [pelangganId], references: [id], onDelete: Cascade)
+
+  @@map("transaksi_detail")
+}
+
+model TransaksiAlgoritmaResult {
+  id                  BigInt    @id @default(autoincrement())
+  transaksiId          BigInt    @map("transaksi_id")
+  algorithm            String
+  totalCost            Decimal?  @map("total_cost") @db.Decimal(14, 3)
+  totalDistanceM       Decimal?  @map("total_distance_m") @db.Decimal(14, 3)
+  totalDurationS       Decimal?  @map("total_duration_s") @db.Decimal(14, 3)
+  totalVisitedNodes    Int?      @map("total_visited_nodes")
+  visitOrder           Json?     @map("visit_order")
+  segments             Json?
+  rawResult            Json?     @map("raw_result")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  transaksi            Transaksi @relation(fields: [transaksiId], references: [id], onDelete: Cascade)
+
+  @@unique([transaksiId, algorithm])
+  @@map("transaksi_algoritma_results")
+}
